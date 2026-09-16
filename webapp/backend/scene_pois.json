@@ -1,0 +1,325 @@
+[
+  {
+    "id": "scene_putuo_coffee_riverside",
+    "category": "scene",
+    "subCategory": "河畔咖啡休憩",
+    "name": "华东师范大学普陀校区校长培训中心河畔咖啡休憩处",
+    "locationName": "校长培训中心河畔咖啡休憩处",
+    "lng": 121.406497,
+    "lat": 31.226309,
+    "campus": "普陀",
+    "source": "manual_amap_picker",
+    "text": "校长培训中心河畔咖啡休憩处 丽娃河畔 河边 水岸 咖啡 饮品 休憩 落座 坐下 聊天 安静 私密 并肩 浪漫 傍晚 约会",
+    "tags": ["咖啡", "休憩", "河畔", "水岸", "落座", "安静", "浪漫", "约会", "普陀"],
+    "scenes": ["date"],
+    "sceneWeight": 1.8,
+    "meta": {
+      "address": "普陀校区校长培训中心河畔面",
+      "notes": "河畔咖啡休憩处，适合约会落座聊天"
+    }
+  },
+  {
+    "id": "scene_putuo_gongqing_field",
+    "category": "scene",
+    "subCategory": "运动场地",
+    "name": "华东师范大学普陀校区共青场",
+    "locationName": "共青场",
+    "lng": 121.404426,
+    "lat": 31.228622,
+    "campus": "普陀",
+    "source": "manual_amap_picker",
+    "text": "运动场地 共青场 足球场 田径场 东运动场 运动场 操场 跑道 开阔 开阔草坪 慢走 慢跑 散步 乘凉 锻炼 散步休闲 校园运动场地",
+    "tags": ["运动场", "操场", "跑道", "开阔", "慢走", "散步", "乘凉", "普陀"],
+    "scenes": ["walk"],
+    "sceneWeight": 2.2,
+    "meta": {
+      "address": "普陀校区共青场",
+      "notes": "开阔运动场地，适合散步与日常活动"
+    }
+  },
+  {
+    "id": "scene_putuo_ancient_trees",
+    "category": "scene",
+    "subCategory": "观景绿地",
+    "name": "华东师范大学普陀校区古木清晖",
+    "locationName": "古木清晖",
+    "lng": 121.408135,
+    "lat": 31.227845,
+    "campus": "普陀",
+    "source": "manual_amap_picker",
+    "text": "观景绿地 古木清晖 河中小岛 古树 清幽 绿荫 林荫 草坪 绿地 水岸 河边 安静 舒适 慢走 散步 并肩 停留 约会",
+    "tags": ["绿地", "古树", "清幽", "草坪", "安静", "散步", "约会", "普陀"],
+    "scenes": ["walk", "date"],
+    "sceneWeight": 1.4,
+    "meta": {
+      "address": "普陀校区古木清晖",
+      "notes": "古树清幽绿地，散步与约会皆宜"
+    }
+  },
+  {
+    "id": "scene_putuo_lotus_bench",
+    "category": "scene",
+    "subCategory": "荷塘长椅",
+    "name": "华东师范大学普陀校区荷花池边长椅",
+    "locationName": "荷花池边长椅",
+    "lng": 121.406893,
+    "lat": 31.229143,
+    "campus": "普陀",
+    "source": "manual_amap_picker",
+    "text": "荷花池边长椅 荷塘 荷花池 水景 长椅 座椅 落座 坐下 安静 私密 花香 并肩 聊天 浪漫 约会",
+    "tags": ["长椅", "座椅", "荷塘", "落座", "安静", "浪漫", "约会", "普陀"],
+    "scenes": ["date"],
+    "sceneWeight": 1.8,
+    "meta": {
+      "address": "普陀校区荷花池边",
+      "notes": "荷塘边长椅，适合约会落座"
+    }
+  },
+  {
+    "id": "scene_putuo_liwa_road",
+    "category": "scene",
+    "subCategory": "河畔步道",
+    "name": "华东师范大学普陀校区丽娃河畔丽娃路",
+    "locationName": "丽娃河畔丽娃路",
+    "lng": 121.405362,
+    "lat": 31.22938,
+    "campus": "普陀",
+    "source": "manual_amap_picker",
+    "text": "丽娃河畔丽娃路 丽娃河 河畔 河边 步道 林荫道 树荫 慢走 散步 乘凉 通行 平坦 开阔 散步休闲",
+    "tags": ["步道", "林荫", "河畔", "树荫", "慢走", "散步", "乘凉", "普陀"],
+    "scenes": ["walk"],
+    "sceneWeight": 1.8,
+    "meta": {
+      "address": "普陀校区丽娃河畔丽娃路",
+      "notes": "河畔林荫步道，适合散步"
+    }
+  },
+  {
+    "id": "scene_putuo_football_field",
+    "category": "scene",
+    "subCategory": "运动场地",
+    "name": "华东师范大学普陀校区足球场",
+    "locationName": "足球场",
+    "lng": 121.404038,
+    "lat": 31.223538,
+    "campus": "普陀",
+    "source": "manual_amap_picker",
+    "text": "运动场地 共青场 足球场 田径场 东运动场 运动场 操场 跑道 开阔 开阔草坪 慢走 慢跑 散步 乘凉 锻炼 散步休闲 校园运动场地",
+    "tags": ["足球场", "运动场", "操场", "开阔", "慢走", "散步", "乘凉", "普陀"],
+    "scenes": ["walk"],
+    "sceneWeight": 2.0,
+    "meta": {
+      "address": "普陀校区足球场",
+      "notes": "开阔运动场地，适合散步"
+    }
+  },
+  {
+    "id": "scene_putuo_xiayu_island",
+    "category": "scene",
+    "subCategory": "水岸休憩",
+    "name": "华东师范大学普陀校区夏雨岛",
+    "locationName": "夏雨岛",
+    "lng": 121.404854,
+    "lat": 31.229632,
+    "campus": "普陀",
+    "source": "manual_amap_picker",
+    "text": "夏雨岛 水岸 湖边 小岛 河畔 安静 清幽 落座 停留 并肩 慢慢走 浪漫 约会",
+    "tags": ["水岸", "小岛", "河畔", "清幽", "安静", "浪漫", "约会", "普陀"],
+    "scenes": ["date"],
+    "sceneWeight": 2.6,
+    "meta": {
+      "address": "普陀校区夏雨岛",
+      "notes": "丽娃河水岸小岛，适合约会停留"
+    }
+  },
+  {
+    "id": "scene_minhang_xuelin_tunnel",
+    "category": "scene",
+    "subCategory": "林荫步道",
+    "name": "华东师范大学闵行校区学林路隧道",
+    "locationName": "学林路隧道",
+    "lng": 121.449826,
+    "lat": 31.034345,
+    "campus": "闵行",
+    "source": "manual_amap_picker",
+    "text": "学林路隧道 学林路 隧道 林荫 步道 树荫 遮阴 慢走 散步 通行 乘凉 平整 散步休闲",
+    "tags": ["步道", "林荫", "隧道", "遮阴", "慢走", "散步", "乘凉", "闵行"],
+    "scenes": ["walk"],
+    "sceneWeight": 1.8,
+    "meta": {
+      "address": "闵行校区学林路",
+      "notes": "林荫步行通道，适合散步"
+    }
+  },
+  {
+    "id": "scene_minhang_football_field",
+    "category": "scene",
+    "subCategory": "运动场地",
+    "name": "华东师范大学闵行校区足球场",
+    "locationName": "足球场",
+    "lng": 121.44855,
+    "lat": 31.032841,
+    "campus": "闵行",
+    "source": "manual_amap_picker",
+    "text": "运动场地 共青场 足球场 田径场 东运动场 运动场 操场 跑道 开阔 开阔草坪 慢走 慢跑 散步 乘凉 锻炼 散步休闲 校园运动场地",
+    "tags": ["足球场", "运动场", "操场", "开阔", "慢走", "散步", "乘凉", "闵行"],
+    "scenes": ["walk"],
+    "sceneWeight": 2.0,
+    "meta": {
+      "address": "闵行校区足球场",
+      "notes": "开阔运动场地，适合散步"
+    }
+  },
+  {
+    "id": "scene_minhang_east_sports",
+    "category": "scene",
+    "subCategory": "运动场地",
+    "name": "华东师范大学闵行校区东运动场",
+    "locationName": "东运动场",
+    "lng": 121.456307,
+    "lat": 31.034088,
+    "campus": "闵行",
+    "source": "manual_amap_picker",
+    "text": "运动场地 共青场 足球场 田径场 东运动场 运动场 操场 跑道 开阔 开阔草坪 慢走 慢跑 散步 乘凉 锻炼 散步休闲 校园运动场地",
+    "tags": ["运动场", "跑道", "开阔", "慢走", "散步", "乘凉", "闵行"],
+    "scenes": ["walk"],
+    "sceneWeight": 2.0,
+    "meta": {
+      "address": "闵行校区东运动场",
+      "notes": "开阔运动场地，适合散步"
+    }
+  },
+  {
+    "id": "scene_minhang_track_field",
+    "category": "scene",
+    "subCategory": "运动场地",
+    "name": "华东师范大学闵行校区田径场",
+    "locationName": "田径场",
+    "lng": 121.455944,
+    "lat": 31.031123,
+    "campus": "闵行",
+    "source": "manual_amap_picker",
+    "text": "运动场地 共青场 足球场 田径场 东运动场 运动场 操场 跑道 开阔 开阔草坪 慢走 慢跑 散步 乘凉 锻炼 散步休闲 校园运动场地",
+    "tags": ["田径场", "跑道", "运动场", "开阔", "慢走", "散步", "乘凉", "闵行"],
+    "scenes": ["walk"],
+    "sceneWeight": 2.0,
+    "meta": {
+      "address": "闵行校区田径场",
+      "notes": "开阔运动场地，适合散步"
+    }
+  },
+  {
+    "id": "scene_minhang_river_islet",
+    "category": "scene",
+    "subCategory": "观景绿地",
+    "name": "华东师范大学闵行校区河中小岛",
+    "locationName": "河中小岛",
+    "lng": 121.452435,
+    "lat": 31.030915,
+    "campus": "闵行",
+    "source": "manual_amap_picker",
+    "text": "观景绿地 古木清晖 河中小岛 古树 清幽 绿荫 林荫 草坪 绿地 水岸 河边 安静 舒适 慢走 散步 并肩 停留 约会",
+    "tags": ["绿地", "小岛", "水岸", "清幽", "安静", "散步", "约会", "闵行"],
+    "scenes": ["walk", "date"],
+    "sceneWeight": 1.4,
+    "meta": {
+      "address": "闵行校区樱桃河中小岛",
+      "notes": "河中小岛绿地，散步与约会皆宜"
+    }
+  },
+  {
+    "id": "scene_putuo_motto_stele",
+    "category": "scene",
+    "subCategory": "地标雕塑",
+    "name": "华东师范大学普陀校区校训碑",
+    "locationName": "校训碑",
+    "lng": 121.405535,
+    "lat": 31.22694,
+    "campus": "普陀",
+    "source": "manual_amap_picker",
+    "text": "地标雕塑 校训碑 毛主席雕塑 纪念雕塑 校训 求实创造 为人师表 校园地标 标志性 取景 拍照 留影 打卡",
+    "tags": ["地标", "雕塑", "校训碑", "打卡", "取景", "拍照", "普陀"],
+    "scenes": ["photo"],
+    "sceneWeight": 1.8,
+    "meta": {
+      "address": "普陀校区正门附近",
+      "notes": "刻有校训的标志性石碑，经典取景地"
+    }
+  },
+  {
+    "id": "scene_putuo_mao_statue",
+    "category": "scene",
+    "subCategory": "地标雕塑",
+    "name": "华东师范大学普陀校区毛主席雕塑",
+    "locationName": "毛主席雕塑",
+    "lng": 121.404473,
+    "lat": 31.226705,
+    "campus": "普陀",
+    "source": "manual_amap_picker",
+    "text": "地标雕塑 校训碑 毛主席雕塑 纪念雕塑 校园地标 标志性 取景 拍照 留影 打卡",
+    "tags": ["地标", "雕塑", "纪念像", "打卡", "取景", "拍照", "普陀"],
+    "scenes": ["photo"],
+    "sceneWeight": 1.8,
+    "meta": {
+      "address": "普陀校区内",
+      "notes": "标志性雕塑，校园取景点"
+    }
+  },
+  {
+    "id": "scene_minhang_library",
+    "category": "scene",
+    "subCategory": "地标建筑",
+    "name": "华东师范大学闵行校区图书馆",
+    "locationName": "图书馆",
+    "lng": 121.452459,
+    "lat": 31.029623,
+    "campus": "闵行",
+    "source": "manual_amap_picker",
+    "text": "地标建筑 图书馆 校园主图书馆 建筑 现代化 地标 标志性 取景 拍照 留影 打卡 学习",
+    "tags": ["地标", "图书馆", "建筑", "打卡", "取景", "拍照", "闵行"],
+    "scenes": ["photo"],
+    "sceneWeight": 2.2,
+    "meta": {
+      "address": "闵行校区中心",
+      "notes": "闵行校区地标建筑，主要取景点"
+    }
+  },
+  {
+    "id": "scene_minhang_wenmai_corridor",
+    "category": "scene",
+    "subCategory": "文化景观",
+    "name": "华东师范大学闵行校区文脉廊",
+    "locationName": "文脉廊",
+    "lng": 121.45451,
+    "lat": 31.031644,
+    "campus": "闵行",
+    "source": "manual_amap_picker",
+    "text": "文化景观 文脉廊 国学 人文 长廊 廊道 林荫 景观 地标 取景 拍照 打卡 慢走 散步 乘凉 开阔",
+    "tags": ["地标", "文化景观", "长廊", "林荫", "拍照", "散步", "闵行"],
+    "scenes": ["walk", "photo"],
+    "sceneWeight": 1.7,
+    "meta": {
+      "address": "闵行校区文脉廊",
+      "notes": "展示学校国学底蕴的文化长廊，散步与取景皆宜"
+    }
+  },
+  {
+    "id": "scene_minhang_cherry_river",
+    "category": "scene",
+    "subCategory": "校园水体",
+    "name": "华东师范大学闵行校区樱桃河",
+    "locationName": "樱桃河",
+    "lng": 121.454303,
+    "lat": 31.032254,
+    "campus": "闵行",
+    "source": "manual_amap_picker",
+    "text": "校园水体 樱桃河 校河 水系 河道 河畔 水岸 垂柳 落樱 樱花步道 风景 取景 拍照 打卡 地标 散步 并肩 慢走 安静 浪漫 约会",
+    "tags": ["地标", "河流", "水岸", "樱花步道", "拍照", "散步", "约会", "闵行"],
+    "scenes": ["photo", "walk", "date"],
+    "sceneWeight": 1.9,
+    "meta": {
+      "address": "闵行校区中部",
+      "notes": "校河，沿岸为樱花步道，闵行标志性水岸景观"
+    }
+  }
+]

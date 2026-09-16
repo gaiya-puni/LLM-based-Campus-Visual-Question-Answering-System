@@ -1,0 +1,14 @@
+{
+  "model": "BAAI/bge-small-zh-v1.5",
+  "createdAt": "2026-09-20T01:16:35.956183+00:00",
+  "sourceHash": "59196d1253068ad61ef81f9efb89e496b2362db37b4f55b5b510fb25384f5b05",
+  "sceneCount": 6,
+  "poiCount": 3042,
+  "sourceFiles": [
+    "scene_profiles.json",
+    "campus_pois.json",
+    "canteen_pois.json",
+    "parking_pois.json",
+    "scene_pois.json"
+  ]
+}

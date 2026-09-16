@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en" style="height: 100%">
+  <head>
+    <meta charset="utf-8" />
+    <script src="http://d3js.org/d3.v3.min.js" charset="utf-8"></script>
+  </head>
+  <body style="height: 100%; margin: 0">
+    <div id="container" style="height: 100%"></div>
+
+    <script
+      type="text/javascript"
+      src="https://registry.npmmirror.com/echarts/5.4.3/files/dist/echarts.min.js"
+    ></script>
+
+    <script type="text/javascript">
+      function sunburst_func(data) {
+        var dom = document.getElementById("container");
+        var myChart = echarts.init(dom, null, {
+          renderer: "canvas",
+          useDirtyRect: false,
+        });
+        var app = {};
+
+        var option;
+
+        option = {
+          visualMap: {
+            type: "continuous",
+            min: 5,
+            max: 170,
+            inRange: {
+              color: [
+                "#b3de69",
+                "#8dd3c7",
+                "#80b1d3",
+                "#bebada",
+                "#DC8FD9",
+                "#fccde5",
+                "#FFE65F",
+              ],
+            },
+            // itemHeight: 200,
+            // itemWidth: 15,
+            colorAlpha: 0.85,
+            calculable: true,
+            orient: "horizontal",
+          },
+          series: {
+            type: "sunburst",
+            data: data,
+            sort: "desc",
+            radius: ["10%", "90%"],
+            label: {
+              rotate: "radial",
+              minAngle: 1,
+              align: "center",
+              fontSize: 11,
+            },
+            labelLayout: {
+              hideOverlap: true,
+            },
+            emphasis: {
+              focus: "ancestor",
+            },
+            nodeClick: "rootToNode",
+            itemStyle: {
+              borderWidth: 1,
+              borderColor: "white",
+            },
+            levels: [
+              {},
+              {
+                r0: "5%",
+                r: "35%",
+                labelLayout: {
+                  moveOverlap: "shiftY",
+                },
+              },
+              {
+                r0: "35%",
+                r: "65%",
+              },
+              {
+                r0: "65%",
+                r: "98%",
+              },
+            ],
+          },
+          tooltip: {
+            show: true,
+            trigger: "item",
+            formatter: "{b}:{c}株",
+          },
+        };
+
+        if (option && typeof option === "object") {
+          myChart.setOption(option);
+        }
+
+        window.addEventListener("resize", myChart.resize);
+      }
+      d3.json("data_for_sunburst.json", function (data) {
+        sunburst_func(data);
+      });
+    </script>
+  </body>
+</html>
