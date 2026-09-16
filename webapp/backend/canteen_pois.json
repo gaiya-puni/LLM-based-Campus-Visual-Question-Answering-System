@@ -1,0 +1,239 @@
+[
+  {
+    "id": "canteen_putuo_hexi",
+    "category": "canteen",
+    "subCategory": "食堂",
+    "name": "华东师范大学普陀校区河西食堂",
+    "locationName": "河西食堂",
+    "lng": 121.403126,
+    "lat": 31.230404,
+    "campus": "普陀",
+    "source": "amap_place_text",
+    "text": "华东师范大学普陀校区河西食堂 华东师范大学中北校区河西食堂 河西食堂 河西餐厅 中山北路3663号华东师范大学中山北路校区 普陀 食堂 餐厅 餐饮 就餐",
+    "tags": [
+      "食堂",
+      "餐厅",
+      "餐饮",
+      "就餐",
+      "普陀",
+      "河西食堂"
+    ],
+    "meta": {
+      "amapName": "华东师范大学中北校区河西食堂",
+      "amapType": "餐饮服务;中餐厅;中餐厅",
+      "address": "中山北路3663号华东师范大学中山北路校区",
+      "aliases": [
+        "河西食堂",
+        "河西餐厅",
+        "华东师范大学中北校区河西食堂"
+      ],
+      "entranceLng": 121.403299,
+      "entranceLat": 31.23042,
+      "sourceQuery": "华东师范大学普陀校区河西食堂"
+    }
+  },
+  {
+    "id": "canteen_putuo_hedong",
+    "category": "canteen",
+    "subCategory": "食堂",
+    "name": "华东师范大学普陀校区河东食堂",
+    "locationName": "河东食堂",
+    "lng": 121.408252,
+    "lat": 31.228959,
+    "campus": "普陀",
+    "source": "amap_place_text",
+    "text": "华东师范大学普陀校区河东食堂 河东食堂 河东餐厅 华东师范大学中山北路3663号 普陀 食堂 餐厅 餐饮 就餐",
+    "tags": [
+      "食堂",
+      "餐厅",
+      "餐饮",
+      "就餐",
+      "普陀",
+      "河东食堂"
+    ],
+    "meta": {
+      "amapName": "华东师范大学普陀校区河东食堂",
+      "amapType": "餐饮服务;中餐厅;中餐厅",
+      "address": "华东师范大学(中山北路3663号)",
+      "aliases": [
+        "河东食堂",
+        "河东餐厅"
+      ],
+      "entranceLng": 121.408138,
+      "entranceLat": 31.228924,
+      "sourceQuery": "华东师范大学普陀校区河东食堂"
+    }
+  },
+  {
+    "id": "canteen_putuo_liwa_western",
+    "category": "canteen",
+    "subCategory": "西餐厅",
+    "name": "华东师范大学普陀校区丽娃西餐厅",
+    "locationName": "丽娃西餐厅",
+    "lng": 121.405114,
+    "lat": 31.224661,
+    "campus": "普陀",
+    "source": "amap_place_text",
+    "text": "华东师范大学普陀校区丽娃西餐厅 华东师范大学丽娃西餐厅 丽娃西餐厅 丽娃食堂 丽娃餐厅 丽娃食堂东二楼 中山北路3663号 普陀 西餐厅 食堂 餐厅 餐饮 就餐",
+    "tags": [
+      "食堂",
+      "西餐厅",
+      "餐厅",
+      "餐饮",
+      "就餐",
+      "普陀",
+      "丽娃西餐厅",
+      "丽娃食堂"
+    ],
+    "meta": {
+      "amapName": "华东师范大学丽娃西餐厅",
+      "amapType": "餐饮服务;中餐厅;中餐厅",
+      "address": "长风新村街道中山北路3663号华东师范大学丽娃食堂东二楼",
+      "aliases": [
+        "丽娃西餐厅",
+        "丽娃食堂",
+        "丽娃餐厅",
+        "华东师范大学丽娃西餐厅"
+      ],
+      "entranceLng": 121.405142,
+      "entranceLat": 31.224383,
+      "sourceQuery": "华东师范大学普陀校区丽娃西餐厅"
+    }
+  },
+  {
+    "id": "canteen_minhang_dongyue",
+    "category": "canteen",
+    "subCategory": "食堂",
+    "name": "华东师范大学闵行校区冬月厅",
+    "locationName": "冬月厅",
+    "lng": 121.450542,
+    "lat": 31.034969,
+    "campus": "闵行",
+    "source": "amap_place_text",
+    "text": "华东师范大学闵行校区冬月厅 冬月厅 冬月餐厅 冬月食堂 东川路500号华东师范大学闵行校区 闵行 食堂 餐厅 餐饮 就餐",
+    "tags": [
+      "食堂",
+      "餐厅",
+      "餐饮",
+      "就餐",
+      "闵行",
+      "冬月厅",
+      "冬月餐厅"
+    ],
+    "meta": {
+      "amapName": "华东师范大学闵行校区冬月厅",
+      "amapType": "餐饮服务;中餐厅;中餐厅",
+      "address": "东川路500号华东师范大学闵行校区",
+      "aliases": [
+        "冬月厅",
+        "冬月餐厅",
+        "冬月食堂"
+      ],
+      "entranceLng": 121.450724,
+      "entranceLat": 31.035173,
+      "sourceQuery": "华东师范大学闵行校区冬月厅"
+    }
+  },
+  {
+    "id": "canteen_minhang_dongri",
+    "category": "canteen",
+    "subCategory": "食堂",
+    "name": "华东师范大学闵行校区冬日餐厅",
+    "locationName": "冬日餐厅",
+    "lng": 121.449329,
+    "lat": 31.034647,
+    "campus": "闵行",
+    "source": "amap_place_text",
+    "text": "华东师范大学闵行校区冬日餐厅 冬日餐厅 冬日食堂 冬日厅 东川路500号华东师范大学闵行校区 闵行 食堂 餐厅 餐饮 就餐",
+    "tags": [
+      "食堂",
+      "餐厅",
+      "餐饮",
+      "就餐",
+      "闵行",
+      "冬日餐厅",
+      "冬日食堂"
+    ],
+    "meta": {
+      "amapName": "冬日餐厅",
+      "amapType": "餐饮服务;中餐厅;中餐厅",
+      "address": "东川路500号华东师范大学闵行校区",
+      "aliases": [
+        "冬日餐厅",
+        "冬日食堂",
+        "冬日厅"
+      ],
+      "entranceLng": 121.449345,
+      "entranceLat": 31.035002,
+      "sourceQuery": "华东师范大学闵行校区冬日餐厅"
+    }
+  },
+  {
+    "id": "canteen_minhang_xiayu",
+    "category": "canteen",
+    "subCategory": "食堂",
+    "name": "华东师范大学闵行校区夏雨厅",
+    "locationName": "夏雨厅",
+    "lng": 121.455439,
+    "lat": 31.032389,
+    "campus": "闵行",
+    "source": "amap_place_text",
+    "text": "华东师范大学闵行校区夏雨厅 夏雨厅 夏雨餐厅 夏雨食堂 吴泾镇东川路500号华东师范大学内夏雨厅 闵行 食堂 餐厅 餐饮 就餐",
+    "tags": [
+      "食堂",
+      "餐厅",
+      "餐饮",
+      "就餐",
+      "闵行",
+      "夏雨厅"
+    ],
+    "meta": {
+      "amapName": "夏雨厅",
+      "amapType": "餐饮服务;中餐厅;中餐厅",
+      "address": "吴泾镇东川路500号华东师范大学内夏雨厅",
+      "aliases": [
+        "夏雨厅",
+        "夏雨餐厅",
+        "夏雨食堂"
+      ],
+      "entranceLng": 121.455341,
+      "entranceLat": 31.031999,
+      "sourceQuery": "华东师范大学闵行校区夏雨厅"
+    }
+  },
+  {
+    "id": "canteen_minhang_qiushige",
+    "category": "canteen",
+    "subCategory": "食堂",
+    "name": "华东师范大学闵行校区秋实阁",
+    "locationName": "秋实阁",
+    "lng": 121.450377,
+    "lat": 31.027454,
+    "campus": "闵行",
+    "source": "amap_place_text",
+    "text": "华东师范大学闵行校区秋实阁 秋实阁 秋实格 秋实餐厅 秋实食堂 东川路500号华东师范大学闵行校区 光华路 闵行 食堂 餐厅 餐饮 就餐",
+    "tags": [
+      "食堂",
+      "餐厅",
+      "餐饮",
+      "就餐",
+      "闵行",
+      "秋实阁",
+      "秋实格"
+    ],
+    "meta": {
+      "amapName": "秋实阁(光华路)",
+      "amapType": "餐饮服务;中餐厅;中餐厅",
+      "address": "东川路500号华东师范大学闵行校区",
+      "aliases": [
+        "秋实阁",
+        "秋实格",
+        "秋实餐厅",
+        "秋实食堂"
+      ],
+      "entranceLng": 121.450688,
+      "entranceLat": 31.027526,
+      "sourceQuery": "华东师范大学闵行校区秋实阁"
+    }
+  }
+]

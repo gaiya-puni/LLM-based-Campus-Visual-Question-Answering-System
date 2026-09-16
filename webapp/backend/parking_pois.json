@@ -1,0 +1,172 @@
+[
+  {
+    "id": "parking_putuo_zhongshanbeilu_gate",
+    "category": "parking",
+    "subCategory": "停车场",
+    "name": "华东师范大学中山北路门停车场",
+    "locationName": "东门附近",
+    "lng": 121.409178,
+    "lat": 31.228721,
+    "campus": "普陀",
+    "source": "manual",
+    "text": "华东师范大学中山北路门停车场 华东师范大学普陀校区 东门附近 停车场 停车 车位 自驾 中山北路门",
+    "tags": ["停车", "停车场", "车位", "自驾", "普陀", "东门附近"],
+    "meta": {
+      "aliases": ["中山北路门停车场", "东门附近停车场"],
+      "sourceQuery": "华东师范大学中山北路门停车场"
+    }
+  },
+  {
+    "id": "parking_putuo_zaoyang788_gate",
+    "category": "parking",
+    "subCategory": "停车场",
+    "name": "华东师范大学枣阳路788号门停车场",
+    "locationName": "788号门附近",
+    "lng": 121.403467,
+    "lat": 31.223965,
+    "campus": "普陀",
+    "source": "manual",
+    "text": "华东师范大学枣阳路788号门停车场 华东师范大学普陀校区 788号门附近 停车场 停车 车位 自驾 枣阳路788号门",
+    "tags": ["停车", "停车场", "车位", "自驾", "普陀", "788号门附近"],
+    "meta": {
+      "aliases": ["788号门停车场", "788号门附近停车场"],
+      "sourceQuery": "华东师范大学枣阳路788号门停车场"
+    }
+  },
+  {
+    "id": "parking_putuo_zaoyang460_gate",
+    "category": "parking",
+    "subCategory": "停车场",
+    "name": "华东师范大学普陀校区枣阳路460号门停车场",
+    "locationName": "460号门附近",
+    "lng": 121.402763,
+    "lat": 31.229894,
+    "campus": "普陀",
+    "source": "manual",
+    "text": "华东师范大学普陀校区枣阳路460号门停车场 华东师范大学普陀校区 460号门附近 停车场 停车 车位 自驾 枣阳路460号门",
+    "tags": ["停车", "停车场", "车位", "自驾", "普陀", "460号门附近"],
+    "meta": {
+      "aliases": ["枣阳路460号门停车场", "枣阳路460停车场", "460号门停车场", "460停车场", "460号门附近停车场", "枣阳路460号门"],
+      "sourceQuery": "华东师范大学普陀校区枣阳路460号门停车场"
+    }
+  },
+  {
+    "id": "parking_putuo_wulilou",
+    "category": "parking",
+    "subCategory": "停车场",
+    "name": "华东师范大学物理楼停车场",
+    "locationName": "物理楼附近",
+    "lng": 121.404363,
+    "lat": 31.225112,
+    "campus": "普陀",
+    "source": "manual",
+    "text": "华东师范大学物理楼停车场 华东师范大学普陀校区 物理楼附近 停车场 停车 车位 自驾 物理楼",
+    "tags": ["停车", "停车场", "车位", "自驾", "普陀", "物理楼附近"],
+    "meta": {
+      "aliases": ["物理楼附近停车场", "物理楼停车场"],
+      "sourceQuery": "华东师范大学物理楼停车场"
+    }
+  },
+  {
+    "id": "parking_putuo_erfuzhong",
+    "category": "parking",
+    "subCategory": "停车场",
+    "name": "华东师范大学二附中停车场",
+    "locationName": "二附中操场附近",
+    "lng": 121.403462,
+    "lat": 31.223272,
+    "campus": "普陀",
+    "source": "manual",
+    "text": "华东师范大学二附中停车场 华东师范大学普陀校区 二附中操场附近 停车场 停车 车位 自驾 二附中",
+    "tags": ["停车", "停车场", "车位", "自驾", "普陀", "二附中操场附近"],
+    "meta": {
+      "aliases": ["二附中操场停车场", "二附中停车场"],
+      "sourceQuery": "华东师范大学二附中停车场"
+    }
+  },
+  {
+    "id": "parking_putuo_likelou",
+    "category": "parking",
+    "subCategory": "停车场",
+    "name": "华东师范大学理科大楼停车场",
+    "locationName": "理科大楼附近",
+    "lng": 121.403992,
+    "lat": 31.227247,
+    "campus": "普陀",
+    "source": "manual",
+    "text": "华东师范大学理科大楼停车场 华东师范大学普陀校区 理科大楼附近 停车场 停车 车位 自驾 理科大楼",
+    "tags": ["停车", "停车场", "车位", "自驾", "普陀", "理科大楼附近"],
+    "meta": {
+      "aliases": ["理科楼停车场", "理科大楼附近停车场"],
+      "sourceQuery": "华东师范大学理科大楼停车场"
+    }
+  },
+  {
+    "id": "parking_minhang_bangonglou",
+    "category": "parking",
+    "subCategory": "停车场",
+    "name": "华东师范大学办公楼停车场",
+    "locationName": "办公楼附近",
+    "lng": 121.455612,
+    "lat": 31.025663,
+    "campus": "闵行",
+    "source": "manual",
+    "text": "华东师范大学办公楼停车场 华东师范大学闵行校区 办公楼附近 停车场 停车 车位 自驾 办公楼",
+    "tags": ["停车", "停车场", "车位", "自驾", "闵行", "办公楼附近"],
+    "meta": {
+      "aliases": ["办公楼停车场", "办公楼附近停车场"],
+      "sourceQuery": "华东师范大学办公楼停车场"
+    }
+  },
+  {
+    "id": "parking_minhang_tushuguan",
+    "category": "parking",
+    "subCategory": "停车场",
+    "name": "华东师范大学图书馆停车场",
+    "locationName": "图书馆附近",
+    "lng": 121.453337,
+    "lat": 31.029162,
+    "campus": "闵行",
+    "source": "manual",
+    "text": "华东师范大学图书馆停车场 华东师范大学闵行校区 图书馆附近 停车场 停车 车位 自驾 图书馆",
+    "tags": ["停车", "停车场", "车位", "自驾", "闵行", "图书馆附近"],
+    "meta": {
+      "aliases": ["图书馆停车场", "图书馆附近停车场"],
+      "sourceQuery": "华东师范大学图书馆停车场"
+    }
+  },
+  {
+    "id": "parking_minhang_tiyuguan",
+    "category": "parking",
+    "subCategory": "停车场",
+    "name": "华东师范大学体育馆停车场",
+    "locationName": "体育馆附近",
+    "lng": 121.454435,
+    "lat": 31.03378,
+    "campus": "闵行",
+    "source": "manual",
+    "text": "华东师范大学体育馆停车场 华东师范大学闵行校区 体育馆附近 停车场 停车 车位 自驾 体育馆",
+    "tags": ["停车", "停车场", "车位", "自驾", "闵行", "体育馆附近"],
+    "meta": {
+      "aliases": ["体育馆停车场", "体育馆附近停车场"],
+      "sourceQuery": "华东师范大学体育馆停车场"
+    }
+  },
+  {
+    "id": "parking_minhang_disanjiaoxuelou",
+    "category": "parking",
+    "subCategory": "停车场",
+    "name": "华东师范大学第四教学楼停车场",
+    "locationName": "第四教学楼附近",
+    "lng": 121.450001,
+    "lat": 31.029663,
+    "campus": "闵行",
+    "source": "manual",
+    "text": "华东师范大学第四教学楼停车场 华东师范大学闵行校区 第四教学楼附近 停车场 停车 车位 自驾 第四教学楼",
+    "tags": ["停车", "停车场", "车位", "自驾", "闵行", "第四教学楼附近"],
+    "meta": {
+      "aliases": ["第四教学楼附近停车场", "四教停车场"],
+      "sourceQuery": "华东师范大学第四教学楼停车场"
+    }
+  }
+]

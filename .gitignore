@@ -1,0 +1,61 @@
+# Claude AI tool config
+CLAUDE.md
+.claude/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.env
+.venv
+venv/
+private_data/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Node / Vue frontend
+webapp/frontend/node_modules/
+webapp/frontend/dist/
+webapp/frontend/dist-ssr/
+webapp/frontend/*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+
+webapp/frontend/vite.config.ts.timestamp-*.mjs
+webapp/frontend/build/
+
+# Generated semantic vector index (rebuild with build_semantic_index.py)
+webapp/backend/semantic_index.npz
+webapp/backend/semantic_index_meta.json
+
+# Offline scene rasters and evaluation artifacts (build_scene_heatmaps.py)
+webapp/backend/heatmap_cache/
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Raw or derived files containing adopter names and free-text messages
+analysis/culture/res.xlsx
+analysis/emotion/raw_data/*.xlsx
+analysis/emotion/res/*.xlsx
+visualization/wordcloud/data/*.xlsx
