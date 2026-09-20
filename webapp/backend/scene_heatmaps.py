@@ -411,12 +411,41 @@ def source_paths(base: Path) -> list[Path]:
     return paths
 
 
+# 指纹要读取并哈希全部语料（campus_pois.json 约 4MB），而 /api/heatmaps 每次
+# 请求都会调用它做过期校验。按「路径 + mtime + size」缓存结果：语料没变就直接
+# 复用哈希；语料被改动时签名随之变化并自动重算，因此过期检测语义保持不变。
+_fingerprint_cache: dict = {}
+_fingerprint_lock = threading.Lock()
+
+
 def fingerprint(base: Path, model: str) -> str:
+    paths = source_paths(base)
+    try:
+        signature = (
+            str(base),
+            model,
+            tuple(
+                (path.name, path.stat().st_mtime_ns, path.stat().st_size)
+                for path in paths
+            ),
+        )
+    except OSError:
+        signature = None
+    if signature is not None:
+        with _fingerprint_lock:
+            cached = _fingerprint_cache.get(signature)
+        if cached is not None:
+            return cached
     digest = hashlib.sha256((ALGORITHM_VERSION + model).encode("utf-8"))
-    for path in source_paths(base):
+    for path in paths:
         digest.update(path.name.encode("utf-8"))
         digest.update(path.read_bytes())
-    return digest.hexdigest()
+    result = digest.hexdigest()
+    if signature is not None:
+        with _fingerprint_lock:
+            _fingerprint_cache.clear()
+            _fingerprint_cache[signature] = result
+    return result
 
 
 def to_meters(coords, center) -> np.ndarray:

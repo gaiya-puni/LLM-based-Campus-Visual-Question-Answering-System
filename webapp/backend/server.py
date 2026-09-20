@@ -1,5 +1,5 @@
 from collections import defaultdict, deque
-from functools import wraps
+from functools import lru_cache, wraps
 from time import monotonic
 
 from dotenv import load_dotenv
@@ -378,7 +378,11 @@ def _category_has_intent(query: str, category: str) -> bool:
     return False
 
 
+@lru_cache(maxsize=256)
 def _intent_categories_from_query(query: str) -> list:
+    # 同一轮问答里该函数会被 _classify_poi_query、_should_rank_places 等重复调用，
+    # 而食堂/停车类别每次都要全量扫描 3000+ 条 POI。结果只取决于 query 与启动时
+    # 固定的 POI 配置，因此按 query 缓存；调用方需自行复制后再修改。
     return [
         category for category in POI_CATEGORY_CONFIGS
         if _category_has_intent(query, category)
@@ -1664,7 +1668,8 @@ def _classify_poi_query(query: str, plants: list, colleges: list,
         categories = scene_categories
         intent = 'scene_recommendation'
     elif intent_categories:
-        categories = intent_categories
+        # 复制一份，避免后续对该列表的修改写回 lru_cache 的缓存对象。
+        categories = list(intent_categories)
         intent = f"{intent_categories[0]}_lookup" if len(intent_categories) == 1 else 'poi_lookup'
     elif institution_location_requested or (college_intent and not plant_intent):
         categories = ['college']

@@ -31,6 +31,9 @@ const initChart = (): void => {
 
 // 重新渲染echarts
 const resizeChart = (): void => {
+	// 先清掉上一个待触发的定时器：连续拖动窗口会不断触发 resize，
+	// 否则会堆积一串定时器，每次都在 500ms 后各调一次 resize()。
+	clearTimeout(timer);
 	timer = setTimeout(() => {
 		if (myChart) {
 			myChart.resize();

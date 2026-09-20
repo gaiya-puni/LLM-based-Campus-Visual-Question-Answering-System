@@ -445,6 +445,10 @@ onUnmounted(() => {
 });
 
 const CHAT_API_URL = '/api/chat';
+// 后端限制单次请求最多 30 条消息。此前每次都回传整段历史，对话到第 16 轮
+// 就会超过上限被后端拒绝（400），前端只能退化成"本地演示模式"提示。
+// 只带最近 20 条，既守住上限也减少每轮重复回传历史带来的 token 开销。
+const MAX_HISTORY_MESSAGES = 20;
 const getCurrentTime = () => {
   const now = new Date();
   return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
@@ -471,7 +475,7 @@ const sendMessage = async (content: string) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        messages: messages.value.map(msg => ({
+        messages: messages.value.slice(-MAX_HISTORY_MESSAGES).map(msg => ({
           role: msg.type === 'user' ? 'user' : 'assistant',
           content: msg.content
         })),
