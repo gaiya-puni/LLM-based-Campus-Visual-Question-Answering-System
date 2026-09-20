@@ -208,6 +208,81 @@ def test_chat_exact_parking_returns_single_map_location():
     _assert(payload.get('ranked_places') == [], f"direct query must not contain Top-K: {payload.get('ranked_places')}")
 
 
+def test_direct_plant_query_respects_selected_campus_over_geolocation():
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {'choices': [{'message': {'content': '已显示普陀校区的荷花玉兰位置。'}}]}
+
+    original_post = server_module.requests.post
+    server_module.requests.post = lambda *args, **kwargs: FakeResponse()
+    try:
+        response = server_module.app.test_client().post('/api/chat', json={
+            'messages': [{'role': 'user', 'content': '荷花玉兰在哪里'}],
+            'userCampus': '普陀',
+            'userLocation': {
+                'lng': 121.453725,
+                'lat': 31.03148,
+                'campus': '闵行',
+                'campusTrusted': True,
+                'trusted': True,
+                'useForDistance': True,
+                'source': 'amap',
+            },
+        })
+    finally:
+        server_module.requests.post = original_post
+
+    _assert(response.status_code == 200, f'expected chat 200, got {response.status_code}')
+    payload = response.get_json()
+    locations = payload.get('locations', [])
+    _assert(locations, 'expected Putuo Magnolia grandiflora locations')
+    _assert(
+        {item.get('campus') for item in locations} == {'普陀'},
+        f'selected Putuo campus must win over Minhang geolocation: {locations}',
+    )
+    _assert(
+        {item.get('name') for item in locations} == {'荷花玉兰'},
+        f'incorrect plant alias leaked into Magnolia query: {locations}',
+    )
+
+
+def test_direct_plant_query_only_falls_back_without_explicit_campus():
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {'choices': [{'message': {'content': '位置查询完成。'}}]}
+
+    original_post = server_module.requests.post
+    server_module.requests.post = lambda *args, **kwargs: FakeResponse()
+    try:
+        client = server_module.app.test_client()
+        fallback = client.post('/api/chat', json={
+            'messages': [{'role': 'user', 'content': '红千层在哪里'}],
+            'userCampus': '闵行',
+        }).get_json()
+        strict = client.post('/api/chat', json={
+            'messages': [{'role': 'user', 'content': '闵行校区红千层在哪里'}],
+            'userCampus': '普陀',
+        }).get_json()
+    finally:
+        server_module.requests.post = original_post
+
+    _assert(fallback.get('locations'), 'implicit campus query should fall back to the available campus')
+    _assert(
+        {item.get('campus') for item in fallback['locations']} == {'普陀'},
+        f'expected Putuo-only fallback locations: {fallback.get("locations")}',
+    )
+    _assert(
+        strict.get('locations') == [],
+        f'explicit Minhang query must not fall back to Putuo: {strict.get("locations")}',
+    )
+
+
 def test_chat_unsupported_query_is_hard_stopped():
     def fail_if_called(*args, **kwargs):
         raise AssertionError('unsupported query must not call the LLM service')
@@ -264,6 +339,8 @@ def run_all():
         test_parking_numeric_gate_alias_query,
         test_semantic_corpus_and_evaluation_cases,
         test_chat_exact_parking_returns_single_map_location,
+        test_direct_plant_query_respects_selected_campus_over_geolocation,
+        test_direct_plant_query_only_falls_back_without_explicit_campus,
         test_chat_unsupported_query_is_hard_stopped,
         test_parking_scene_prefers_nearest,
     ]

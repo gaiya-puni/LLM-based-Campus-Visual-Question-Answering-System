@@ -461,7 +461,8 @@ def search_plants(query: str, top_k: int = 8) -> list:
     return [p for _, p in scored[:top_k]]
 
 
-def build_plant_context(plants: list) -> str:
+def build_plant_context(plants: list, campus_filter=None,
+                        direct_location: bool = False) -> str:
     """将植物列表格式化为可注入 system prompt 的文本，包含精确位置和建筑位置。"""
     if not plants:
         return ''
@@ -470,10 +471,34 @@ def build_plant_context(plants: list) -> str:
         lines.append(f"\n【{p['name']}】科属：{p.get('branch','')} | 习性：{p.get('habit','')}")
         for block in p.get('blocks', []):
             lines.append(f"  {block['title']}：{block['content'].strip()}")
-        precise = [loc for loc in _TREE_PRECISE_LOCATIONS.get(p['name'], [])
-                   if re.search(r'[一-鿿]', loc)]
+        coords = _TREE_COORDS.get(p['name'], [])
+        if campus_filter:
+            coords = [
+                coord for coord in coords
+                if _campus(coord.get('lng'), coord.get('lat')) == campus_filter
+            ]
+        precise = []
+        for coord in coords:
+            location = (coord.get('number') or '').strip()
+            if re.search(r'[一-鿿]', location) and location not in precise:
+                precise.append(location)
         building = _TREE_LOCATIONS.get(p['name'], [])
-        if precise:
+        if campus_filter and precise:
+            lines.append(f"  {campus_filter}校区位置：{'、'.join(precise[:3])}")
+        elif campus_filter:
+            lines.append(f"  {campus_filter}校区位置：暂无具体位置记录")
+        elif direct_location and coords:
+            for campus in ('普陀', '闵行'):
+                campus_locations = []
+                for coord in coords:
+                    location = (coord.get('number') or '').strip()
+                    if (_campus(coord.get('lng'), coord.get('lat')) == campus
+                            and re.search(r'[一-鿿]', location)
+                            and location not in campus_locations):
+                        campus_locations.append(location)
+                if campus_locations:
+                    lines.append(f"  {campus}校区位置：{'、'.join(campus_locations[:3])}")
+        elif precise:
             lines.append(f"  校园位置：{'、'.join(precise[:3])}")
         elif building:
             lines.append(f"  校园位置：{'、'.join(building[:3])}")
@@ -809,8 +834,8 @@ def _normalize_campus(value):
 def _preferred_campus_from_request(data: dict):
     ranking_location = _ranking_location_from_request(data)
     user_campus = _normalize_campus(data.get('userCampus'))
-    if ranking_location and ranking_location.get('campus_trusted'):
-        return ranking_location.get('campus')
+    # The campus selected in the UI is the user's explicit scope. Browser
+    # geolocation is only a fallback when no campus was selected.
     if user_campus:
         return user_campus
     if ranking_location:
@@ -2829,7 +2854,11 @@ def chat():
     # 检索相关植物、学院位置和植树留言
     plants = search_plants(user_query)
     colleges = search_colleges(user_query)
-    institution_location_requested = _looks_like_institution_location_query(user_query)
+    named_location_plants = _direct_location_plant_names(user_query, plants)
+    institution_location_requested = (
+        _looks_like_institution_location_query(user_query)
+        and not named_location_plants
+    )
     nearby_requested = bool(colleges and _wants_nearby_plants(user_query))
     nearby_plants = find_nearby_plants(colleges) if nearby_requested else []
     if colleges and institution_location_requested and not nearby_requested:
@@ -2840,9 +2869,23 @@ def chat():
         colleges,
         institution_location_requested
     )
-    direct_plant_names = _direct_location_plant_names(user_query, plants) if direct_plant_location_requested else []
+    direct_plant_names = named_location_plants if direct_plant_location_requested else []
     if direct_plant_names:
         plants = [plant for plant in plants if plant.get('name') in direct_plant_names]
+    direct_plant_campus = None
+    if direct_plant_location_requested:
+        explicit_campus = _campus_filter_from_query(user_query)
+        requested_campus = explicit_campus or preferred_campus
+        campus_has_target = bool(requested_campus and any(
+            _campus(coord.get('lng'), coord.get('lat')) == requested_campus
+            for plant in plants
+            for coord in _TREE_COORDS.get(plant.get('name'), [])
+        ))
+        # An explicitly named campus is strict. A UI-selected campus is used
+        # when it has data; otherwise return the available campus so the UI can
+        # switch with its existing warning.
+        if explicit_campus or campus_has_target:
+            direct_plant_campus = requested_campus
     unsupported_data_query = _is_unsupported_data_query(
         user_query,
         plants,
@@ -2914,7 +2957,11 @@ def chat():
         )
     ranked_place_context = build_ranked_place_context(ranked_places)
     direct_poi_context = build_direct_poi_context(direct_pois)
-    plant_context = '' if ranked_places or direct_pois else build_plant_context(plants)
+    plant_context = '' if ranked_places or direct_pois else build_plant_context(
+        plants,
+        campus_filter=direct_plant_campus,
+        direct_location=direct_plant_location_requested,
+    )
     college_context = '' if direct_pois else build_college_context(colleges)
     nearby_plant_context = '' if ranked_places or direct_pois else build_nearby_plant_context(nearby_plants)
     emotions = [] if unsupported_data_query or direct_pois else search_emotions(user_query)
@@ -2944,7 +2991,9 @@ def chat():
         system_content += '\n\n' + direct_poi_context
     if ranked_place_context:
         system_content += '\n\n' + ranked_place_context
-    if not unsupported_data_query and preferred_campus and not _campus_filter_from_query(user_query):
+    if (not unsupported_data_query and preferred_campus
+            and not _campus_filter_from_query(user_query)
+            and not (direct_plant_location_requested and direct_plant_campus is None)):
         system_content += f'\n\n用户当前位置更接近{preferred_campus}校区；本轮未明确指定校区时，优先围绕{preferred_campus}校区作答。'
     if plant_context:
         system_content += '\n\n' + plant_context
@@ -3047,7 +3096,12 @@ def chat():
 
         for p in plants:
             coords = _TREE_COORDS.get(p['name'], [])
-            if not direct_plant_location_requested:
+            if direct_plant_location_requested and direct_plant_campus:
+                coords = [
+                    coord for coord in coords
+                    if _campus(coord.get('lng'), coord.get('lat')) == direct_plant_campus
+                ]
+            elif not direct_plant_location_requested:
                 coords = coords[:20]
             for c in coords:
                 add_location(p['name'], c['lng'], c['lat'], c['number'], _campus(c['lng'], c['lat']), 'plant')
