@@ -54,13 +54,13 @@ onBeforeUnmount(() => {
 	myChart = null;
 });
 
+// option 变化时复用现有实例更新，不再销毁重建整个图表。
+// 用浅比较（去掉 deep）：本项目三个图表 option 均为静态常量，引用不变时不会触发；
+// 未来若替换 option 引用，也只需 setOption 合并，无需 dispose 重建。
 watch(
 	() => props.option,
 	() => {
-		initChart();
-	},
-	{
-		deep: true
+		myChart?.setOption(props.option, true);
 	}
 );
 </script>
