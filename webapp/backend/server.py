@@ -1183,7 +1183,14 @@ def _is_direct_plant_location_query(query: str, plants: list, colleges: list,
     if re.search(r'适合|合适|推荐|赏|看.*花|拍照|摄影|打卡|散步|风景|景色|约会', query or ''):
         return False
     has_location_intent = re.search(r'哪里|在哪|位置|地点|地图|显示|分布|有哪些|有什么', query or '')
-    return bool(has_location_intent and _direct_location_plant_names(query, plants))
+    has_existence_intent = re.search(
+        r'有没有|是否有|有无|能否找到|能不能找到|找得到|有.{1,12}[吗嘛么]\s*$',
+        query or '',
+    )
+    return bool(
+        (has_location_intent or has_existence_intent)
+        and _direct_location_plant_names(query, plants)
+    )
 
 
 def _nearest_college_distance(point: dict, colleges: list):

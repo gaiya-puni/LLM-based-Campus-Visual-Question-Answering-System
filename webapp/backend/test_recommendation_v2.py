@@ -283,6 +283,41 @@ def test_direct_plant_query_only_falls_back_without_explicit_campus():
     )
 
 
+def test_plant_existence_query_returns_every_registered_point_without_ranking():
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {'choices': [{'message': {'content': '闵行校区有杏。'}}]}
+
+    original_post = server_module.requests.post
+    server_module.requests.post = lambda *args, **kwargs: FakeResponse()
+    try:
+        payload = server_module.app.test_client().post('/api/chat', json={
+            'messages': [{'role': 'user', 'content': '校园里有没有杏花'}],
+            'userCampus': '闵行',
+        }).get_json()
+    finally:
+        server_module.requests.post = original_post
+
+    locations = payload.get('locations', [])
+    _assert(payload.get('ranked_places') == [], f'existence query must not use Top-K: {payload}')
+    _assert(len(locations) == 3, f'expected all three registered apricot points: {locations}')
+    _assert(
+        {item.get('number') for item in locations} == {'03743', '03513', '03503'},
+        f'unexpected apricot locations: {locations}',
+    )
+    _assert(
+        {item.get('name') for item in locations} == {'杏'},
+        f'apricot query must not include ginkgo: {locations}',
+    )
+    _assert(
+        {item.get('kind') for item in locations} == {'plant'},
+        f'existence query markers must not have ranked_place Top labels: {locations}',
+    )
+
+
 def test_chat_unsupported_query_is_hard_stopped():
     def fail_if_called(*args, **kwargs):
         raise AssertionError('unsupported query must not call the LLM service')
@@ -341,6 +376,7 @@ def run_all():
         test_chat_exact_parking_returns_single_map_location,
         test_direct_plant_query_respects_selected_campus_over_geolocation,
         test_direct_plant_query_only_falls_back_without_explicit_campus,
+        test_plant_existence_query_returns_every_registered_point_without_ranking,
         test_chat_unsupported_query_is_hard_stopped,
         test_parking_scene_prefers_nearest,
     ]
