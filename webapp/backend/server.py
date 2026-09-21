@@ -102,9 +102,41 @@ except (OSError, ValueError, json.JSONDecodeError) as exc:
     print(f'Unable to load emotion data: {exc}')
     _EMOTIONS = []
 
-DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY', '')
-DEEPSEEK_API_URL = os.getenv('DEEPSEEK_API_URL', 'https://api.deepseek.com/v1/chat/completions')
-DEEPSEEK_MODEL = os.getenv('DEEPSEEK_MODEL', 'deepseek-chat')
+# 大模型服务商注册表。DeepSeek 与 ChatECNU 都提供 OpenAI 兼容的
+# /chat/completions 接口且响应结构一致（choices[0].message.content），
+# 因此切换服务商只需换 URL / KEY / MODEL 三项，调用与解析代码可完全复用。
+# 用 LLM_PROVIDER 选择当前生效的服务商，默认 deepseek 以兼容旧配置。
+LLM_PROVIDERS = {
+    'deepseek': {
+        'label': 'DeepSeek',
+        'api_key': os.getenv('DEEPSEEK_API_KEY', ''),
+        'api_url': os.getenv('DEEPSEEK_API_URL', 'https://api.deepseek.com/v1/chat/completions'),
+        'model': os.getenv('DEEPSEEK_MODEL', 'deepseek-chat'),
+    },
+    'chatecnu': {
+        'label': 'ChatECNU',
+        'api_key': os.getenv('CHATECNU_API_KEY', ''),
+        'api_url': os.getenv('CHATECNU_API_URL', 'https://chat.ecnu.edu.cn/open/api/v1/chat/completions'),
+        'model': os.getenv('CHATECNU_MODEL', 'ecnu-plus'),
+    },
+}
+
+
+def resolve_llm(provider=None):
+    """返回当前生效的服务商配置；一个都没配置密钥时返回 None。
+
+    provider 为空时读取环境变量 LLM_PROVIDER。若指定（或默认）的服务商
+    没有密钥，则按注册表顺序回退到第一个已配置密钥的服务商——避免因为
+    切换了名字却忘了配密钥，导致整个问答功能直接不可用。
+    """
+    names = list(LLM_PROVIDERS)
+    wanted = (provider or os.getenv('LLM_PROVIDER') or 'deepseek').strip().lower()
+    order = ([wanted] if wanted in LLM_PROVIDERS else []) + [n for n in names if n != wanted]
+    for name in order:
+        entry = LLM_PROVIDERS[name]
+        if entry['api_key'] and entry['api_url'] and entry['model']:
+            return dict(entry, name=name)
+    return None
 
 
 DB_CONFIG = {
@@ -3016,15 +3048,16 @@ def chat():
     if emotion_context:
         system_content += '\n' + emotion_context
 
-    if not DEEPSEEK_API_KEY:
+    llm = resolve_llm()
+    if not llm:
         return jsonify({'error': 'AI 服务尚未配置'}), 503
 
     try:
         resp = requests.post(
-            DEEPSEEK_API_URL,
-            headers={'Authorization': f'Bearer {DEEPSEEK_API_KEY}', 'Content-Type': 'application/json'},
+            llm['api_url'],
+            headers={'Authorization': f"Bearer {llm['api_key']}", 'Content-Type': 'application/json'},
             json={
-                'model': DEEPSEEK_MODEL,
+                'model': llm['model'],
                 'messages': [{'role': 'system', 'content': system_content}] + messages,
                 'temperature': 0.3,
                 'max_tokens': 1024,
