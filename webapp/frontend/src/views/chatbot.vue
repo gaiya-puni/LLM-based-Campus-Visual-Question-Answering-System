@@ -10,7 +10,10 @@
       <SceneHeatmapPanel :map="heatmapMap" :campus="activeCampus" :mode="recommendationMode"
         :response="heatmapResponse" :reset-token="heatmapReset" :busy="isLoading"
         @update:mode="setRecommendationMode" @places="showHeatmapPlaces" @active="heatmapActive = $event" />
-      <div v-if="mapLocations.length === 0 && !heatmapActive" class="map-placeholder">
+      <div v-if="mapError" class="map-placeholder">
+        <p>⚠️ {{ mapError }}</p>
+      </div>
+      <div v-else-if="mapLocations.length === 0 && !heatmapActive" class="map-placeholder">
         <p>{{ allLocations.length ? `${activeCampus}校区暂无该地点` : '💬 提问后，相关位置将在地图上显示' }}</p>
       </div>
     </div>
@@ -97,6 +100,7 @@ import { marked } from "marked";
 import DOMPurify from 'dompurify';
 import SceneHeatmapPanel from '../components/SceneHeatmapPanel.vue';
 import type { HeatmapPayload } from '../components/sceneHeatmapTypes';
+import { loadAMap } from '../amap';
 
 marked.setOptions({ breaks: true, gfm: true });
 const parseMarkdown = (text: string) => DOMPurify.sanitize(
@@ -161,6 +165,8 @@ let walking: any = null;
 let userMarker: any = null;
 let geolocation: any = null;
 
+const mapError = ref('');
+
 const initMap = () => {
   map = new (window as any).AMap.Map('chat-map', {
     zoom: 16,
@@ -218,13 +224,7 @@ const assessMapLocation = (lng: number, lat: number, accuracy?: number): UserLoc
   };
 };
 
-const getAmapCurrentLocation = () => new Promise<UserLocation | null>((resolve) => {
-  const AMap = (window as any).AMap;
-  if (!AMap) {
-    resolve(null);
-    return;
-  }
-
+const watchAmapGeolocation = (AMap: any) => new Promise<UserLocation | null>((resolve) => {
   AMap.plugin('AMap.Geolocation', () => {
     try {
       if (!geolocation) {
@@ -262,6 +262,12 @@ const getAmapCurrentLocation = () => new Promise<UserLocation | null>((resolve) 
     }
   });
 });
+
+// index.html 用 async 引入高德脚本，这里必须等它就绪，否则定位会静默返回 null。
+const getAmapCurrentLocation = async (): Promise<UserLocation | null> => {
+  const AMap = await loadAMap().catch(() => null);
+  return AMap ? watchAmapGeolocation(AMap) : null;
+};
 
 // 检测用户地址对应的最近校区，用于后端优先推荐
 const detectUserCampus = async () => {
@@ -431,8 +437,16 @@ const navigateTo = (destLng: number, destLat: number) => {
 };
 
 onMounted(() => {
-  nextTick(() => {
+  nextTick(async () => {
+    try {
+      await loadAMap();
+    } catch (err) {
+      mapError.value = err instanceof Error ? err.message : '地图加载失败';
+      return;
+    }
     initMap();
+    // 地图就绪前若已有问答结果，这里补渲染一次，避免标记丢失。
+    filterAndShow();
     detectUserCampus();
   });
 });
