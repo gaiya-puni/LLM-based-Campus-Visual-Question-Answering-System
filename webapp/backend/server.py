@@ -17,6 +17,8 @@ import threading
 
 from semantic_retrieval import SemanticRetriever
 from scene_heatmaps import SCENE_IDS, HeatmapStore, HeatmapUnavailable, heatmap_chat_response, register_heatmap_routes
+from itinerary import (build_chat_reply, build_itinerary_context, is_itinerary_query,
+                       plan_day, render_fallback_text)
 
 _BASE = os.path.dirname(__file__)
 load_dotenv(os.path.join(_BASE, '../../.env'))
@@ -2877,6 +2879,87 @@ def change_password():
     return jsonify({'success': True})
 
 
+# ---------------------------------------------------------------------------
+# 一日行程规划：骨架由 itinerary.py 确定性编排，大模型只负责写文案
+# ---------------------------------------------------------------------------
+
+#: 每个时段取候选用的（合成查询, 来源场景）。合成查询里**不写校区名**，
+#: 校区一律由 preferred_campus 参数决定，避免与用户实际询问的校区冲突。
+_ITINERARY_PERIOD_QUERIES = (
+    ('morning', (('校园里适合散步的地方', 'walk'),
+                 ('校园里适合拍照的地方', 'photo'))),
+    ('noon', (('校园里吃饭的食堂餐厅', 'dining'),)),
+    ('afternoon', (('校园里哪里适合赏花', 'flower_viewing'),
+                   ('校园里适合拍照的景点', 'photo'),
+                   ('校园里适合安静自习的地方', 'study'))),
+)
+
+_ITINERARY_SYSTEM_PROMPT = (
+    '你是华东师范大学校园导览助手。用户第一次来校，需要一份一日行程。'
+    '下面给出的站点顺序、名称与推荐理由已由系统确定，你只能据此撰写自然语言行程说明，'
+    '不得新增、替换或删除地点，也不得编造营业时间、票价或未提供的任何信息。'
+    '请分上午/中午/下午三段描述，说明每站的推荐理由、建议停留时长，以及相邻两站如何前往。'
+)
+
+
+def _itinerary_summary(context: str):
+    """用当前生效的大模型生成行程文案；失败返回 None，由调用方走确定性兜底文案。"""
+    llm = resolve_llm()
+    if not llm or not context:
+        return None
+    try:
+        resp = requests.post(
+            llm['api_url'],
+            headers={'Authorization': f"Bearer {llm['api_key']}", 'Content-Type': 'application/json'},
+            json={
+                'model': llm['model'],
+                'messages': [
+                    {'role': 'system', 'content': _ITINERARY_SYSTEM_PROMPT},
+                    {'role': 'user', 'content': context},
+                ],
+                'temperature': 0.4,
+                'max_tokens': 1024,
+            },
+            timeout=30
+        )
+        resp.raise_for_status()
+        content = resp.json()['choices'][0]['message']['content']
+        return content.strip() or None
+    except (requests.RequestException, KeyError, IndexError, TypeError, ValueError):
+        return None
+
+
+def _build_itinerary_reply(campus, ranking_location):
+    """编排一日行程并生成文案；站点不足时返回 None，由调用方回退到普通推荐。
+
+    候选只来自既有的规则排序结果（`rank_campus_places`），不读取也不修改
+    热力图算法与任何缓存，因此与 SAKDE 侧的演进完全解耦。
+    """
+    period_candidates = {}
+    for period, sources in _ITINERARY_PERIOD_QUERIES:
+        items = []
+        for query, scene in sources:
+            ranked = rank_campus_places(
+                query, [], [], top_k=3,
+                preferred_campus=campus,
+                ranking_location=ranking_location
+            )
+            items.extend(dict(place, scene=scene) for place in ranked)
+        period_candidates[period] = items
+
+    origin = None
+    if isinstance(ranking_location, dict):
+        origin = (ranking_location.get('lng'), ranking_location.get('lat'))
+    plan = plan_day(campus, period_candidates, origin)
+    if not plan['sufficient']:
+        return None
+
+    context = build_itinerary_context(campus, plan)
+    summary = _itinerary_summary(context)
+    return build_chat_reply(
+        campus, plan, summary or render_fallback_text(campus, plan), fallback=summary is None)
+
+
 @app.route("/api/chat", methods=["POST"])
 @rate_limit(30)
 def chat():
@@ -2948,6 +3031,20 @@ def chat():
             'ranked_places': [],
             'unsupported': True,
         })
+
+    # 一日行程规划：用纯规则判定意图，优先于下面的 SAKDE 场景分支；命中即直接返回，
+    # 未命中的查询完全走原逻辑。它与场景热图同属"新模式"的能力，因此同样只在用户主动
+    # 选择 sakde 时接管，保证常规导航（默认路径）的行为与过去完全一致；站点不足时记一条
+    # 提示，交给下面的普通推荐继续回答（与 heatmap_status 同一范式）。
+    itinerary_status = None
+    if (data.get('recommendationMode') == 'sakde' and not direct_pois
+            and not direct_plant_location_requested and not institution_location_requested
+            and is_itinerary_query(user_query)):
+        itinerary_campus = _campus_filter_from_query(user_query) or preferred_campus or '普陀'
+        itinerary_reply = _build_itinerary_reply(itinerary_campus, ranking_location)
+        if itinerary_reply:
+            return jsonify(itinerary_reply)
+        itinerary_status = '一日行程的可用地点不足，已改为按单场景推荐'
 
     # 第二阶段只接管主动选择 sakde 的四类宽泛场景。旧请求默认走原逻辑，
     # 精确地点、指定植物、学院附近和停车/餐饮查询均不改变。
@@ -3162,6 +3259,8 @@ def chat():
         result['recommendation_engine'] = 'rule'
         if heatmap_fallback:
             result['heatmap_status'] = heatmap_fallback
+        if itinerary_status:
+            result['itinerary_status'] = itinerary_status
     return jsonify(result)
 
 

@@ -10,6 +10,8 @@
       <SceneHeatmapPanel :map="heatmapMap" :campus="activeCampus" :mode="recommendationMode"
         :response="heatmapResponse" :reset-token="heatmapReset" :busy="isLoading"
         @update:mode="setRecommendationMode" @places="showHeatmapPlaces" @active="heatmapActive = $event" />
+      <ItineraryPanel :itinerary="visibleItinerary"
+        @focus="focusItineraryStop" @navigate="navigateItineraryStop" />
       <div v-if="mapError" class="map-placeholder">
         <p>⚠️ {{ mapError }}</p>
       </div>
@@ -95,11 +97,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, shallowRef, nextTick, onMounted, onUnmounted } from "vue";
+import { ref, shallowRef, computed, nextTick, onMounted, onUnmounted } from "vue";
 import { marked } from "marked";
 import DOMPurify from 'dompurify';
 import SceneHeatmapPanel from '../components/SceneHeatmapPanel.vue';
+import ItineraryPanel from '../components/ItineraryPanel.vue';
 import type { HeatmapPayload } from '../components/sceneHeatmapTypes';
+import type { ItineraryPayload, ItineraryStop } from '../components/itineraryTypes';
 import { loadAMap } from '../amap';
 
 marked.setOptions({ breaks: true, gfm: true });
@@ -121,6 +125,11 @@ interface Location {
   reason?: string;
   plants?: string[];
   access_verified?: boolean;
+  /** 一日行程站点专用字段（kind === 'itinerary_stop'） */
+  seq?: number;
+  period?: string;
+  periodLabel?: string;
+  dwellMinutes?: number;
 }
 interface UserLocation {
   lng: number;
@@ -145,6 +154,13 @@ const userLocation = ref<UserLocation | null>(null);
 const recommendationMode = ref('sakde');
 const heatmapMap = shallowRef<any>(null);
 const heatmapResponse = shallowRef<HeatmapPayload | null>(null);
+const itineraryResponse = shallowRef<ItineraryPayload | null>(null);
+// 行程面板必须与地图保持一致：切到别的校区时该行程的标记已被过滤掉，面板也不应再显示。
+// 只做显示层过滤、不清数据，切回原校区即自动恢复。
+const visibleItinerary = computed(() =>
+  itineraryResponse.value && itineraryResponse.value.campus === activeCampus.value
+    ? itineraryResponse.value
+    : null);
 const heatmapActive = ref(false);
 const heatmapReset = ref(0);
 
@@ -164,6 +180,8 @@ let markerInfoWindows: any[] = [];
 let walking: any = null;
 let userMarker: any = null;
 let geolocation: any = null;
+// 行程路线使用独立实例数组，与单点导航（walking）互不干扰地清理与绘制。
+let itineraryWalkings: any[] = [];
 
 const mapError = ref('');
 
@@ -289,6 +307,8 @@ const clearMarkers = () => {
   markersArray.forEach(m => m.setMap(null));
   markersArray = [];
   if (walking) walking.clear();
+  itineraryWalkings.forEach(item => item.clear());
+  itineraryWalkings = [];
   if (userMarker) { userMarker.setMap(null); userMarker = null; }
 };
 
@@ -301,28 +321,70 @@ const escapeHtml = (value: unknown) => String(value ?? '')
 
 const buildInfoContent = (loc: Location, navBtnId: string) => {
   const isRanked = loc.kind === 'ranked_place';
+  const isStop = loc.kind === 'itinerary_stop';
   const rankLine = isRanked
     ? `<div style="margin-bottom:6px;color:#c20a1c;font-weight:700">Top ${loc.rank ?? '-'}</div>`
-    : '';
+    : isStop
+      ? `<div style="margin-bottom:6px;color:#c20a1c;font-weight:700">第 ${loc.seq ?? '-'} 站${loc.periodLabel ? ` · ${escapeHtml(loc.periodLabel)}` : ''}</div>`
+      : '';
   const plantsLine = loc.plants?.length
     ? `<br><span style="color:#666;font-size:13px">代表植物：${escapeHtml(loc.plants.join('、'))}</span>`
     : '';
   const reasonLine = loc.reason
     ? `<br><span style="color:#666;font-size:13px">推荐依据：${escapeHtml(loc.reason)}</span>`
     : '';
+  const dwellLine = isStop && loc.dwellMinutes
+    ? `<br><span style="color:#666;font-size:13px">建议停留约 ${loc.dwellMinutes} 分钟</span>`
+    : '';
 
   return `<div style="padding:4px 2px;max-width:260px">
     ${rankLine}<b>${escapeHtml(loc.name)}</b>
     <br><span style="color:#666;font-size:13px">${escapeHtml(loc.number)}</span>
-    ${plantsLine}${reasonLine}
+    ${plantsLine}${reasonLine}${dwellLine}
     ${loc.access_verified === false ? '<br><span style="color:#8a5a00;font-size:12px">真实POI参考位置，通行情况需现场确认</span>' : ''}
     <br><button id="${navBtnId}" style="margin-top:8px;padding:4px 12px;background:#c20a1c;color:white;border:none;border-radius:4px;cursor:pointer;font-size:13px">步行导航到这里</button>
   </div>`;
 };
 
 const pickMapLocations = (locations: Location[]) => {
-  const ranked = locations.filter(loc => loc.kind === 'ranked_place');
+  const ranked = locations.filter(
+    loc => loc.kind === 'ranked_place' || loc.kind === 'itinerary_stop');
   return ranked.length ? ranked : locations;
+};
+
+let itineraryRouteToken = 0;
+
+// 行程路线：为每一段"步行"腿各建一个独立的 AMap.Walking 实例分别绘制，
+// 因此多段路线可同时呈现，且不会与单点导航（walking）互相清除。
+// 超过步行阈值的腿（后端标记为 riding）不画线，由面板与信息窗给出骑行/校车提示。
+const drawItineraryRoute = (locations: Location[]) => {
+  itineraryWalkings.forEach(item => item.clear());
+  itineraryWalkings = [];
+  if (!map || !(window as any).AMap) return;
+  const stops = locations
+    .filter(loc => loc.kind === 'itinerary_stop' && typeof loc.seq === 'number')
+    .sort((a, b) => (a.seq as number) - (b.seq as number));
+  if (stops.length < 2) return;
+  const riding = new Set((itineraryResponse.value?.legs || [])
+    .filter(leg => leg.mode !== 'walking')
+    .map(leg => `${leg.fromSeq}-${leg.toSeq}`));
+  const token = ++itineraryRouteToken;
+  (window as any).AMap.plugin('AMap.Walking', () => {
+    if (token !== itineraryRouteToken) return;
+    for (let index = 0; index < stops.length - 1; index++) {
+      if (riding.has(`${stops[index].seq}-${stops[index + 1].seq}`)) continue;
+      const route = new (window as any).AMap.Walking({
+        map, hideMarkers: true, autoFitView: false,
+        // 描边用校园红，与单点导航的默认样式区分开（路线主体仍为平台样式）。
+        isOutline: true, outlineColor: '#b7081b',
+      });
+      route.search(
+        [stops[index].lng, stops[index].lat],
+        [stops[index + 1].lng, stops[index + 1].lat],
+      );
+      itineraryWalkings.push(route);
+    }
+  });
 };
 
 const showLocationsOnMap = (locations: Location[]) => {
@@ -335,6 +397,12 @@ const showLocationsOnMap = (locations: Location[]) => {
     if (loc.kind === 'ranked_place' && loc.rank) {
       markerOptions.label = {
         content: `Top${loc.rank}`,
+        offset: new (window as any).AMap.Pixel(0, -30),
+      };
+    } else if (loc.kind === 'itinerary_stop' && loc.seq) {
+      // 序号与行程面板的徽章一一对应，形成面板与地图的双向对应。
+      markerOptions.label = {
+        content: `第${loc.seq}站`,
         offset: new (window as any).AMap.Pixel(0, -30),
       };
     }
@@ -354,7 +422,8 @@ const showLocationsOnMap = (locations: Location[]) => {
     });
     markersArray.push(marker);
   });
-  if (locations.some(loc => loc.access_verified === false)) {
+  const hasItineraryStops = locations.some(loc => loc.kind === 'itinerary_stop');
+  if (locations.some(loc => loc.access_verified === false) || hasItineraryStops) {
     // AMap padding order is top, bottom, left, right; keep new heatmap markers
     // outside the controls without changing the original recommendation view.
     const panelPadding = window.matchMedia('(max-width: 900px)').matches ? 260 : 300;
@@ -362,6 +431,7 @@ const showLocationsOnMap = (locations: Location[]) => {
   } else {
     map.setFitView(markersArray);
   }
+  drawItineraryRoute(locations);
 };
 
 // 按当前校区过滤并显示标记
@@ -378,6 +448,7 @@ const showHeatmapPlaces = (places: HeatmapPayload['places']) => {
 const setRecommendationMode = (mode: string) => {
   recommendationMode.value = mode;
   heatmapResponse.value = null;
+  itineraryResponse.value = null;
   heatmapReset.value++;
   allLocations.value = [];
   filterAndShow();
@@ -402,6 +473,23 @@ const switchCampus = (campus: string) => {
   map?.setZoom(16);
   filterAndShow();
 };
+
+// 行程面板 → 地图：定位并弹出该站标记的信息窗，形成双向对应。
+const focusItineraryStop = (stop: ItineraryStop) => {
+  if (!map) return;
+  const index = markersArray.findIndex((marker: any) => {
+    const position = marker.getPosition();
+    return Math.abs(position.lng - stop.lng) < 1e-6 && Math.abs(position.lat - stop.lat) < 1e-6;
+  });
+  map.setZoom(17);
+  map.setCenter([stop.lng, stop.lat]);
+  if (index >= 0 && markerInfoWindows[index]) {
+    markerInfoWindows[index].open(map, markersArray[index].getPosition());
+  }
+};
+
+// 行程面板 → 单站导航：复用既有单点导航，行程路线保持独立不被清除。
+const navigateItineraryStop = (stop: ItineraryStop) => navigateTo(stop.lng, stop.lat);
 
 const navigateTo = (destLng: number, destLat: number) => {
   const doRoute = (startLng: number, startLat: number) => {
@@ -497,6 +585,8 @@ const sendMessage = async (content: string) => {
     if (!response.ok) throw new Error(`API请求失败: ${response.status}`);
     const data = await response.json();
     messages.value.push({ type: 'bot', content: data.choices?.[0]?.message?.content || '抱歉，我暂时无法回答这个问题。', time: getCurrentTime() });
+    // 行程数据需先于地图渲染更新：绘制行程路线时会读 legs 判断哪些腿是骑行。
+    itineraryResponse.value = data.itinerary || null;
     if (data.locations?.length) {
       allLocations.value = pickMapLocations(data.locations);
       const campuses = Array.from(new Set(allLocations.value.map(loc => loc.campus).filter(Boolean)));
@@ -524,6 +614,10 @@ const sendMessage = async (content: string) => {
     if (data.heatmap_status) {
       const last = messages.value[messages.value.length - 1];
       if (last?.type === 'bot') last.content += `\n\n> 热图提示：${data.heatmap_status}。本次使用原版推荐。`;
+    }
+    if (data.itinerary_status) {
+      const last = messages.value[messages.value.length - 1];
+      if (last?.type === 'bot') last.content += `\n\n> 行程提示：${data.itinerary_status}。`;
     }
   } catch {
     messages.value.push({
