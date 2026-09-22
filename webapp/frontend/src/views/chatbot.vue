@@ -10,7 +10,7 @@
       <SceneHeatmapPanel :map="heatmapMap" :campus="activeCampus" :mode="recommendationMode"
         :response="heatmapResponse" :reset-token="heatmapReset" :busy="isLoading"
         @update:mode="setRecommendationMode" @places="showHeatmapPlaces" @active="heatmapActive = $event" />
-      <ItineraryPanel :itinerary="visibleItinerary"
+      <ItineraryPanel :itinerary="panelItinerary"
         @focus="focusItineraryStop" @navigate="navigateItineraryStop" />
       <div v-if="mapError" class="map-placeholder">
         <p>⚠️ {{ mapError }}</p>
@@ -161,6 +161,25 @@ const visibleItinerary = computed(() =>
   itineraryResponse.value && itineraryResponse.value.campus === activeCampus.value
     ? itineraryResponse.value
     : null);
+
+// 高德算路返回的真实步行数据（key = `${fromSeq}-${toSeq}`）。
+// 后端为了不依赖外部服务，给出的是平面直线估算；这里用地图上真实算出来的路线结果覆盖它，
+// 拿不到结果（算路失败/无网络）的腿保留估算，并由 `estimated` 让面板标出"约"。
+const legRouteInfo = ref<Record<string, { distanceMeters: number; durationMinutes: number }>>({});
+const panelItinerary = computed(() => {
+  const payload = visibleItinerary.value;
+  if (!payload) return null;
+  return {
+    ...payload,
+    legs: (payload.legs || []).map(leg => {
+      // 后端已用高德真实路线算过（estimated === false）时以它为准——对话文案里的数字就是它，
+      // 前端再覆盖反而造成"气泡与面板不一致"。只有后端给的是估算时才用地图上的算路结果补上。
+      if (leg.estimated === false) return leg;
+      const real = legRouteInfo.value[`${leg.fromSeq}-${leg.toSeq}`];
+      return real ? { ...leg, ...real, estimated: false } : { ...leg, estimated: true };
+    }),
+  };
+});
 const heatmapActive = ref(false);
 const heatmapReset = ref(0);
 
@@ -372,7 +391,8 @@ const drawItineraryRoute = (locations: Location[]) => {
   (window as any).AMap.plugin('AMap.Walking', () => {
     if (token !== itineraryRouteToken) return;
     for (let index = 0; index < stops.length - 1; index++) {
-      if (riding.has(`${stops[index].seq}-${stops[index + 1].seq}`)) continue;
+      const legKey = `${stops[index].seq}-${stops[index + 1].seq}`;
+      if (riding.has(legKey)) continue;
       const route = new (window as any).AMap.Walking({
         map, hideMarkers: true, autoFitView: false,
         // 描边用校园红，与单点导航的默认样式区分开（路线主体仍为平台样式）。
@@ -381,6 +401,21 @@ const drawItineraryRoute = (locations: Location[]) => {
       route.search(
         [stops[index].lng, stops[index].lat],
         [stops[index + 1].lng, stops[index + 1].lat],
+        // 复用同一份算路结果：把高德返回的真实距离/时长回填给面板，失败则保留后端估算。
+        (status: string, result: any) => {
+          if (token !== itineraryRouteToken || status !== 'complete') return;
+          const best = result?.routes?.[0];
+          const distance = Number(best?.distance);
+          const seconds = Number(best?.time);
+          if (!Number.isFinite(distance) || !Number.isFinite(seconds)) return;
+          legRouteInfo.value = {
+            ...legRouteInfo.value,
+            [legKey]: {
+              distanceMeters: Math.round(distance),
+              durationMinutes: Math.max(1, Math.round(seconds / 60)),
+            },
+          };
+        },
       );
       itineraryWalkings.push(route);
     }

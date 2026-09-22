@@ -30,10 +30,17 @@ export interface ItineraryLeg {
   toSeq: number;
   /** 超过步行距离阈值时降级为 riding，并给出骑行/校车提示 */
   mode: 'walking' | 'riding';
+  /** 后端给出的是平面直线估算；前端拿到高德真实算路结果后会覆盖它 */
   distanceMeters: number;
   durationMinutes: number;
   fromName: string;
   toName: string;
+  /**
+   * true / 缺省表示该腿的距离与时长是后端的直线估算（高德真实路线尚未回填）。
+   * 后端用高德 Web 服务算过真实路线时会给出 false，此时前端不得覆盖，以保证
+   * 面板数字与对话文案一致；面板据此在数字前加"约"字标出估算。
+   */
+  estimated?: boolean;
 }
 
 /** 某时段没有可用地点时的说明（后端 skipped 字段） */

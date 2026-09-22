@@ -141,6 +141,15 @@ def resolve_llm(provider=None):
     return None
 
 
+# 大模型与高德都是国内服务，默认**直连**：显式把两个代理都置为 None，避免被系统的
+# 代理设置带偏。Clash 等工具会把 Windows 系统代理注册成 `https://127.0.0.1:7897`，
+# requests 会把它当成 TLS 代理去连，抛 SSLEOFError，表现为"AI 服务请求失败"。
+# 若网络环境确实必须走代理，在 .env 里配置 LLM_HTTP_PROXY=http://127.0.0.1:7897。
+_LLM_PROXY = os.getenv('LLM_HTTP_PROXY', '').strip()
+_LLM_PROXIES = ({'http': _LLM_PROXY, 'https': _LLM_PROXY} if _LLM_PROXY
+                else {'http': None, 'https': None})
+
+
 DB_CONFIG = {
     'host': os.getenv('MYSQL_HOST', 'localhost'),
     'port': int(os.getenv('MYSQL_PORT', '3306')),
@@ -2898,6 +2907,7 @@ _ITINERARY_SYSTEM_PROMPT = (
     '你是华东师范大学校园导览助手。用户第一次来校，需要一份一日行程。'
     '下面给出的站点顺序、名称与推荐理由已由系统确定，你只能据此撰写自然语言行程说明，'
     '不得新增、替换或删除地点，也不得编造营业时间、票价或未提供的任何信息。'
+    '下面没有给出的距离、耗时等数字一律不要写，也不要估算，只说"步行可达""建议骑行"这类说法。'
     '请分上午/中午/下午三段描述，说明每站的推荐理由、建议停留时长，以及相邻两站如何前往。'
 )
 
@@ -2920,7 +2930,8 @@ def _itinerary_summary(context: str):
                 'temperature': 0.4,
                 'max_tokens': 1024,
             },
-            timeout=30
+            timeout=30,
+            proxies=_LLM_PROXIES,
         )
         resp.raise_for_status()
         content = resp.json()['choices'][0]['message']['content']
@@ -3159,7 +3170,8 @@ def chat():
                 'temperature': 0.3,
                 'max_tokens': 1024,
             },
-            timeout=30
+            timeout=30,
+            proxies=_LLM_PROXIES,
         )
         resp.raise_for_status()
         result = resp.json()

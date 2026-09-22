@@ -240,6 +240,9 @@ def _leg_from(previous: dict, following: dict, max_walk_meters: float) -> dict:
         "durationMinutes": max(1, int(round(distance / speed))),
         "fromName": previous["name"],
         "toName": following["name"],
+        # 这里的数字是平面直线估算。调用方若用高德真实路线算出结果，应把它改成 False；
+        # 只有 estimated 为 False 的腿才允许把这些数字写进大模型上下文（见 build_itinerary_context）。
+        "estimated": True,
     }
 
 
@@ -330,11 +333,14 @@ def build_itinerary_context(campus, plan) -> str:
             f"（停留约 {stop['dwellMinutes']} 分钟）｜推荐理由：{stop['reason']}"
         )
     for leg in plan.get("legs") or []:
-        mode_label = "步行" if leg["mode"] == "walking" else "建议骑行或乘校车"
-        lines.append(
-            f"第 {leg['fromSeq']} 站 → 第 {leg['toSeq']} 站：{mode_label}，"
-            f"约 {leg['distanceMeters']} 米 / {leg['durationMinutes']} 分钟"
-        )
+        # 数字会原样出现在对话文案与面板里，因此只允许写"能核实"的值：后端默认是直线估算，
+        # 与面板（按高德真实路线校正）天然不一致，所以估算腿只说交通方式、不给数字。
+        if leg.get("estimated", True):
+            detail = "步行前往" if leg["mode"] == "walking" else "距离较远，建议骑行或乘校车"
+        else:
+            mode_label = "步行" if leg["mode"] == "walking" else "建议骑行或乘校车"
+            detail = f"{mode_label}，约 {leg['distanceMeters']} 米 / {leg['durationMinutes']} 分钟"
+        lines.append(f"第 {leg['fromSeq']} 站 → 第 {leg['toSeq']} 站：{detail}")
     for item in plan.get("skipped") or []:
         lines.append(f"{item['label']}时段暂无合适地点，请在文案中说明该段留白的原因。")
     lines.append("请用第二人称写一段总时长约一天的中文行程说明，语气亲切、给出顺序与理由。")
@@ -353,7 +359,14 @@ def render_fallback_text(campus, plan) -> str:
             f"{stop['reason']}"
         )
     for leg in plan.get("legs") or []:
-        if leg["mode"] == "walking":
+        # 与 build_itinerary_context 同口径：估算腿不写数字。这段文案同样会出现在对话气泡里，
+        # 若带上直线估算的距离，就会与面板（按高德真实路线校正）不一致。
+        if leg.get("estimated", True):
+            if leg["mode"] == "walking":
+                lines.append(f"从{leg['fromName']}到{leg['toName']}步行前往即可。")
+            else:
+                lines.append(f"从{leg['fromName']}到{leg['toName']}距离较远，建议骑行或乘校车。")
+        elif leg["mode"] == "walking":
             lines.append(
                 f"从{leg['fromName']}到{leg['toName']}步行约 {leg['durationMinutes']} 分钟"
                 f"（{leg['distanceMeters']} 米）。"

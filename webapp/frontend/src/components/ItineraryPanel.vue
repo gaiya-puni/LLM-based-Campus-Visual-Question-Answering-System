@@ -102,13 +102,18 @@ const timeline = computed(() => {
   return groups;
 });
 
-const legText = (leg: ItineraryLeg) => (leg.mode === 'walking'
-  ? `步行 ${leg.durationMinutes} 分钟 · ${leg.distanceMeters} 米`
-  : `约 ${leg.distanceMeters} 米，建议骑行或乘校车`);
+/** `estimated` 为真说明该腿还没有高德真实算路结果，用"约"标出这是估算值。 */
+const legText = (leg: ItineraryLeg) => {
+  const approx = leg.estimated ? '约 ' : '';
+  return leg.mode === 'walking'
+    ? `步行${approx}${leg.durationMinutes} 分钟 · ${leg.distanceMeters} 米`
+    : `${approx}${leg.distanceMeters} 米，建议骑行或乘校车`;
+};
 
 // 新一轮行程到达时自动展开，避免用户以为没有内容。
-watch(() => props.itinerary, value => {
-  if (value && value.stops.length) collapsed.value = false;
+// 只跟踪站点数组的引用：通行段被真实路线数据更新时不应把用户收起的面板强制展开。
+watch(() => props.itinerary?.stops, value => {
+  if (value && value.length) collapsed.value = false;
 });
 </script>
 

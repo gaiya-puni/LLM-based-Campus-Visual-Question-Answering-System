@@ -233,6 +233,25 @@ class ItineraryCopyTests(unittest.TestCase):
         plan = it.plan_day('普陀', {'morning': [], 'noon': [], 'afternoon': []})
         self.assertIn('暂时无法生成', it.render_fallback_text('普陀', plan))
 
+    def test_fallback_text_omits_numbers_for_estimated_legs(self):
+        # 兜底文案也会进对话气泡，因此估算腿同样不能带距离数字
+        plan = _plan()
+        leg_lines = [line for line in it.render_fallback_text('普陀', plan).splitlines()
+                     if line.startswith('从')]
+        self.assertTrue(leg_lines)
+        for line in leg_lines:
+            self.assertNotIn('米', line)
+            self.assertIn('步行前往即可', line)
+
+    def test_fallback_text_keeps_numbers_for_verified_legs(self):
+        plan = _plan()
+        for leg in plan['legs']:
+            leg['estimated'] = False
+        leg_lines = [line for line in it.render_fallback_text('普陀', plan).splitlines()
+                     if line.startswith('从')]
+        for line in leg_lines:
+            self.assertIn('米', line)
+
     def test_context_lists_stops_and_legs(self):
         plan = _plan()
         context = it.build_itinerary_context('普陀', plan)
@@ -240,6 +259,30 @@ class ItineraryCopyTests(unittest.TestCase):
             self.assertIn(stop['name'], context)
         self.assertIn('第 1 站 → 第 2 站', context)
         self.assertIn('不得新增', context)
+
+    def test_context_omits_numbers_for_estimated_legs(self):
+        # 直线估算的数字会与面板（高德真实路线）不一致，因此不得写进上下文
+        plan = _plan()
+        self.assertTrue(all(leg['estimated'] for leg in plan['legs']))
+        leg_lines = [line for line in it.build_itinerary_context('普陀', plan).splitlines()
+                     if '站 → 第' in line]
+        self.assertTrue(leg_lines)
+        for line in leg_lines:
+            self.assertNotIn('米', line)
+            self.assertNotIn('分钟', line)
+            self.assertIn('步行前往', line)
+
+    def test_context_keeps_numbers_for_verified_legs(self):
+        # 换成高德真实路线结果（estimated=False）后，数字可以写进上下文
+        plan = _plan()
+        for leg in plan['legs']:
+            leg['estimated'] = False
+        leg_lines = [line for line in it.build_itinerary_context('普陀', plan).splitlines()
+                     if '站 → 第' in line]
+        self.assertTrue(leg_lines)
+        for line in leg_lines:
+            self.assertIn('米', line)
+            self.assertIn('分钟', line)
 
     def test_context_is_empty_without_stops(self):
         plan = it.plan_day('普陀', {'morning': [], 'noon': [], 'afternoon': []})
