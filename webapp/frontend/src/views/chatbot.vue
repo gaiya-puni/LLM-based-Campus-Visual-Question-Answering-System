@@ -201,6 +201,14 @@ let userMarker: any = null;
 let geolocation: any = null;
 // 行程路线使用独立实例数组，与单点导航（walking）互不干扰地清理与绘制。
 let itineraryWalkings: any[] = [];
+let itineraryRouteToken = 0;
+
+const resetItineraryRouteState = () => {
+  itineraryRouteToken++;
+  itineraryWalkings.forEach(item => item.clear());
+  itineraryWalkings = [];
+  legRouteInfo.value = {};
+};
 
 const mapError = ref('');
 
@@ -326,8 +334,7 @@ const clearMarkers = () => {
   markersArray.forEach(m => m.setMap(null));
   markersArray = [];
   if (walking) walking.clear();
-  itineraryWalkings.forEach(item => item.clear());
-  itineraryWalkings = [];
+  resetItineraryRouteState();
   if (userMarker) { userMarker.setMap(null); userMarker = null; }
 };
 
@@ -371,14 +378,11 @@ const pickMapLocations = (locations: Location[]) => {
   return ranked.length ? ranked : locations;
 };
 
-let itineraryRouteToken = 0;
-
 // 行程路线：为每一段"步行"腿各建一个独立的 AMap.Walking 实例分别绘制，
 // 因此多段路线可同时呈现，且不会与单点导航（walking）互相清除。
 // 超过步行阈值的腿（后端标记为 riding）不画线，由面板与信息窗给出骑行/校车提示。
 const drawItineraryRoute = (locations: Location[]) => {
-  itineraryWalkings.forEach(item => item.clear());
-  itineraryWalkings = [];
+  resetItineraryRouteState();
   if (!map || !(window as any).AMap) return;
   const stops = locations
     .filter(loc => loc.kind === 'itinerary_stop' && typeof loc.seq === 'number')
@@ -484,6 +488,7 @@ const setRecommendationMode = (mode: string) => {
   recommendationMode.value = mode;
   heatmapResponse.value = null;
   itineraryResponse.value = null;
+  resetItineraryRouteState();
   heatmapReset.value++;
   allLocations.value = [];
   filterAndShow();
@@ -621,6 +626,7 @@ const sendMessage = async (content: string) => {
     const data = await response.json();
     messages.value.push({ type: 'bot', content: data.choices?.[0]?.message?.content || '抱歉，我暂时无法回答这个问题。', time: getCurrentTime() });
     // 行程数据需先于地图渲染更新：绘制行程路线时会读 legs 判断哪些腿是骑行。
+    resetItineraryRouteState();
     itineraryResponse.value = data.itinerary || null;
     if (data.locations?.length) {
       allLocations.value = pickMapLocations(data.locations);

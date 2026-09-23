@@ -104,41 +104,26 @@ except (OSError, ValueError, json.JSONDecodeError) as exc:
     print(f'Unable to load emotion data: {exc}')
     _EMOTIONS = []
 
-# 大模型服务商注册表。DeepSeek 与 ChatECNU 都提供 OpenAI 兼容的
-# /chat/completions 接口且响应结构一致（choices[0].message.content），
-# 因此切换服务商只需换 URL / KEY / MODEL 三项，调用与解析代码可完全复用。
-# 用 LLM_PROVIDER 选择当前生效的服务商，默认 deepseek 以兼容旧配置。
-LLM_PROVIDERS = {
-    'deepseek': {
+# DeepSeek 配置只从根目录 .env 读取，密钥不会进入前端。
+DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY', '')
+DEEPSEEK_API_URL = os.getenv(
+    'DEEPSEEK_API_URL',
+    'https://api.deepseek.com/v1/chat/completions'
+)
+DEEPSEEK_MODEL = os.getenv('DEEPSEEK_MODEL', 'deepseek-chat')
+
+# 当前版本固定使用 DeepSeek。未配置密钥时明确返回未配置，
+# 不再静默切换到其他服务商，避免调用方误判实际的数据流向。
+def resolve_llm():
+    if not DEEPSEEK_API_KEY or not DEEPSEEK_API_URL or not DEEPSEEK_MODEL:
+        return None
+    return {
         'label': 'DeepSeek',
-        'api_key': os.getenv('DEEPSEEK_API_KEY', ''),
-        'api_url': os.getenv('DEEPSEEK_API_URL', 'https://api.deepseek.com/v1/chat/completions'),
-        'model': os.getenv('DEEPSEEK_MODEL', 'deepseek-chat'),
-    },
-    'chatecnu': {
-        'label': 'ChatECNU',
-        'api_key': os.getenv('CHATECNU_API_KEY', ''),
-        'api_url': os.getenv('CHATECNU_API_URL', 'https://chat.ecnu.edu.cn/open/api/v1/chat/completions'),
-        'model': os.getenv('CHATECNU_MODEL', 'ecnu-plus'),
-    },
-}
-
-
-def resolve_llm(provider=None):
-    """返回当前生效的服务商配置；一个都没配置密钥时返回 None。
-
-    provider 为空时读取环境变量 LLM_PROVIDER。若指定（或默认）的服务商
-    没有密钥，则按注册表顺序回退到第一个已配置密钥的服务商——避免因为
-    切换了名字却忘了配密钥，导致整个问答功能直接不可用。
-    """
-    names = list(LLM_PROVIDERS)
-    wanted = (provider or os.getenv('LLM_PROVIDER') or 'deepseek').strip().lower()
-    order = ([wanted] if wanted in LLM_PROVIDERS else []) + [n for n in names if n != wanted]
-    for name in order:
-        entry = LLM_PROVIDERS[name]
-        if entry['api_key'] and entry['api_url'] and entry['model']:
-            return dict(entry, name=name)
-    return None
+        'name': 'deepseek',
+        'api_key': DEEPSEEK_API_KEY,
+        'api_url': DEEPSEEK_API_URL,
+        'model': DEEPSEEK_MODEL,
+    }
 
 
 # 大模型与高德都是国内服务，默认**直连**：显式把两个代理都置为 None，避免被系统的
@@ -526,7 +511,9 @@ def build_plant_context(plants: list, campus_filter=None,
             if re.search(r'[一-鿿]', location) and location not in precise:
                 precise.append(location)
         building = _TREE_LOCATIONS.get(p['name'], [])
-        if campus_filter and precise:
+        if direct_location:
+            lines.append(f"  地图点位数：{len(coords)}（具体位置请查看地图标记，不要在回答中逐条罗列地址或距离）")
+        elif campus_filter and precise:
             lines.append(f"  {campus_filter}校区位置：{'、'.join(precise[:3])}")
         elif campus_filter:
             lines.append(f"  {campus_filter}校区位置：暂无具体位置记录")
@@ -548,6 +535,60 @@ def build_plant_context(plants: list, campus_filter=None,
         else:
             lines.append("  校园位置：暂无具体位置记录")
     return '\n'.join(lines)
+
+
+def build_direct_plant_location_reply(plants: list, campus_filter=None) -> str:
+    """为具体植物位置查询生成稳定的简短说明，位置明细交给地图展示。"""
+    def intro_for(name, plant):
+        intro = (plant.get('habit') or '').strip()
+        if not intro:
+            blocks = plant.get('blocks') or []
+            intro = next((str(block.get('content', '')).strip()
+                          for block in blocks if block.get('content')), '')
+        if intro and len(intro.strip('。；，、 ')) >= 8:
+            return intro[:55].rstrip('，。；、') + '。'
+        if '竹' in name:
+            return '竹类植物枝叶挺拔、形态清秀，四季都很有辨识度，常用于营造清幽的校园绿化景观。'
+        if any(word in name for word in ('樱', '梅', '桃', '桂', '玉兰', '荷', '菊')):
+            return '这类植物观赏性较强，花色和姿态会随季节变化，适合在校园里观察花期和景观效果。'
+        if any(word in name for word in ('松', '柏', '杉', '榆', '槐', '银杏')):
+            return '这类木本植物树形和枝叶都很有辨识度，季节变化明显，适合观察树冠形态和叶色变化。'
+        return '这是校园绿化中的常见植物，具有一定的观赏价值，可结合叶形、树形和季节变化进行观察。'
+
+    sections = []
+    if len(plants or []) > 1:
+        merged_coords = {
+            (round(coord.get('lng', 0), 6), round(coord.get('lat', 0), 6))
+            for plant in plants or []
+            for coord in _TREE_COORDS.get(plant.get('name'), [])
+            if not campus_filter or _campus(coord.get('lng'), coord.get('lat')) == campus_filter
+        }
+        names = [plant.get('name') or '' for plant in plants]
+        label = '竹类植物' if names and all('竹' in name for name in names) else '相关植物'
+        scope = f'{campus_filter}校区' if campus_filter else '校园内'
+        intro = intro_for(names[0], plants[0]) if names else '可结合叶形、树形和季节变化观察。'
+        location_text = f'{scope}已标注 {len(merged_coords)} 个点位' if merged_coords else f'{scope}暂无可靠的具体位置记录'
+        return f'{label}：{location_text}。{intro} 左侧地图已标注相关位置，点击标记可查看详情和导航 🗺️'
+
+    for plant in plants or []:
+        name = plant.get('name') or '该植物'
+        coords = [
+            coord for coord in _TREE_COORDS.get(name, [])
+            if not campus_filter or _campus(coord.get('lng'), coord.get('lat')) == campus_filter
+        ]
+        unique_points = {(round(coord.get('lng', 0), 6), round(coord.get('lat', 0), 6))
+                         for coord in coords}
+        count = len(unique_points)
+        intro = intro_for(name, plant)
+        scope = f'{campus_filter}校区' if campus_filter else '校园内'
+        location_text = f'{scope}已标注 {count} 个点位' if count else f'{scope}暂无可靠的具体位置记录'
+        detail = f'{name}：{location_text}。'
+        if intro:
+            detail += f' {intro}'
+        sections.append(detail)
+    if not sections:
+        return '地图已标注相关植物位置，请点击地图标记查看详情。'
+    return '；'.join(sections) + ' 左侧地图已标注相关位置，点击标记可查看详情和导航 🗺️'
 
 
 def search_colleges(query: str, top_k: int = 5) -> list:
@@ -1219,6 +1260,23 @@ def _direct_location_plant_names(query: str, plants: list) -> list:
     return matched
 
 
+def _plant_candidates_from_location_query(query: str) -> list:
+    """从已有植物坐标名称补充检索结果，覆盖模板中未收录的植物俗称。"""
+    terms = _query_terms(query)
+    terms |= {term[:-1] for term in terms if len(term) >= 2 and term[-1] in '子树花草'}
+    if '竹' in (query or ''):
+        terms.add('竹')
+    candidates = []
+    for name in _TREE_COORDS:
+        normalized = re.sub(r'[^一-鿿A-Za-z0-9]', '', name).lower()
+        if any(len(term) >= 2 and term.lower() in normalized for term in terms):
+            candidates.append({'name': name, 'habit': ''})
+    if not candidates and '竹' in (query or ''):
+        candidates = [{'name': name, 'habit': ''}
+                      for name in _TREE_COORDS if '竹' in name]
+    return candidates
+
+
 def _is_direct_plant_location_query(query: str, plants: list, colleges: list,
                                     institution_location_requested: bool) -> bool:
     if not plants or colleges or institution_location_requested or _wants_nearby_plants(query):
@@ -1230,10 +1288,12 @@ def _is_direct_plant_location_query(query: str, plants: list, colleges: list,
         r'有没有|是否有|有无|能否找到|能不能找到|找得到|有.{1,12}[吗嘛么]\s*$',
         query or '',
     )
-    return bool(
-        (has_location_intent or has_existence_intent)
-        and _direct_location_plant_names(query, plants)
-    )
+    if not (has_location_intent or has_existence_intent):
+        return False
+    if _direct_location_plant_names(query, plants):
+        return True
+    # 坐标数据中存在、但植物模板没有收录的俗称（例如“竹子”）也按定位查询处理。
+    return bool(plants and all(not plant.get('blocks') and not plant.get('habit') for plant in plants))
 
 
 def _nearest_college_distance(point: dict, colleges: list):
@@ -2401,7 +2461,8 @@ def _rank_poi_groups(candidates: list, profile: dict, top_k: int,
 def rank_campus_pois(query: str, plants: list, colleges: list, top_k: int = 2,
                       institution_location_requested: bool = False,
                       preferred_campus=None,
-                      ranking_location=None) -> list:
+                      ranking_location=None,
+                      strict_campus=False) -> list:
     """统一 POI 规则评分：分类问题、筛 POI 候选，再按文本命中/密度/距离排序。"""
     if not _CAMPUS_POIS:
         return []
@@ -2420,7 +2481,8 @@ def rank_campus_pois(query: str, plants: list, colleges: list, top_k: int = 2,
         profile['intent'] == 'canteen_lookup' and profile['wants_nearby']
     ) else 300
     candidates = _poi_candidates(profile, max_distance_m)
-    if not candidates and profile.get('preferred_campus') and not profile.get('explicit_campus_filter'):
+    if (not candidates and profile.get('preferred_campus')
+            and not profile.get('explicit_campus_filter') and not strict_campus):
         profile = dict(profile)
         profile['campus_filter'] = None
         candidates = _poi_candidates(profile, max_distance_m)
@@ -2440,7 +2502,8 @@ def rank_campus_pois(query: str, plants: list, colleges: list, top_k: int = 2,
 def rank_campus_places(query: str, plants: list, colleges: list, top_k: int = 2,
                         institution_location_requested: bool = False,
                         preferred_campus=None,
-                        ranking_location=None) -> list:
+                        ranking_location=None,
+                        strict_campus=False) -> list:
     """规则评分版地点推荐：优先走统一 POI 场景配置，必要时回退到植物点聚合。"""
     if direct_configured_poi_matches(query):
         return []
@@ -2456,7 +2519,8 @@ def rank_campus_places(query: str, plants: list, colleges: list, top_k: int = 2,
         top_k=top_k,
         institution_location_requested=institution_location_requested,
         preferred_campus=preferred_campus,
-        ranking_location=ranking_location
+        ranking_location=ranking_location,
+        strict_campus=strict_campus
     )
     if poi_ranked:
         return poi_ranked
@@ -2953,7 +3017,8 @@ def _build_itinerary_reply(campus, ranking_location):
             ranked = rank_campus_places(
                 query, [], [], top_k=3,
                 preferred_campus=campus,
-                ranking_location=ranking_location
+                ranking_location=ranking_location,
+                strict_campus=True
             )
             items.extend(dict(place, scene=scene) for place in ranked)
         period_candidates[period] = items
@@ -2962,7 +3027,8 @@ def _build_itinerary_reply(campus, ranking_location):
     if isinstance(ranking_location, dict):
         origin = (ranking_location.get('lng'), ranking_location.get('lat'))
     plan = plan_day(campus, period_candidates, origin)
-    if not plan['sufficient']:
+    if (not plan['sufficient']
+            or any(stop.get('campus') != campus for stop in plan.get('stops', []))):
         return None
 
     context = build_itinerary_context(campus, plan)
@@ -2986,6 +3052,7 @@ def chat():
 
     # 检索相关植物、学院位置和植树留言
     plants = search_plants(user_query)
+    location_plant_candidates = plants or _plant_candidates_from_location_query(user_query)
     colleges = search_colleges(user_query)
     named_location_plants = _direct_location_plant_names(user_query, plants)
     institution_location_requested = (
@@ -2998,11 +3065,16 @@ def chat():
         plants = []
     direct_plant_location_requested = _is_direct_plant_location_query(
         user_query,
-        plants,
+        location_plant_candidates,
         colleges,
         institution_location_requested
     )
-    direct_plant_names = named_location_plants if direct_plant_location_requested else []
+    if direct_plant_location_requested and not plants:
+        plants = location_plant_candidates
+    direct_plant_names = (_direct_location_plant_names(user_query, plants)
+                          if direct_plant_location_requested else [])
+    if direct_plant_location_requested and not direct_plant_names and plants is location_plant_candidates:
+        direct_plant_names = [plant.get('name') for plant in plants if plant.get('name')]
     if direct_plant_names:
         plants = [plant for plant in plants if plant.get('name') in direct_plant_names]
     direct_plant_campus = None
@@ -3118,7 +3190,7 @@ def chat():
 
 【回答规则】
 1. 【禁止编造位置】只能使用下方数据中明确出现的位置，绝对不能补充、推测或编造任何数据中没有的位置信息
-2. 【位置格式】回答精确位置时按数据回答；回答系统推荐地点时必须覆盖下方提供的全部 Top 地点；只有植物大量点位查询才列出 2~3 个代表性位置。末尾可加一句"左侧地图已标注相关位置，点击标记可导航 🗺️"
+2. 【位置格式】具体植物位置查询只概括校区和地图点位数量，配合植物简介即可；不要逐条罗列多个地址、不要输出距离，也不要只挑一个点位冒充全部结果。末尾可加一句"左侧地图已标注相关位置，点击标记可导航 🗺️"
 3. 【无位置记录】若数据中某植物没有位置记录，只说"暂无具体位置记录"，不做任何补充猜测
 4. 【场景/情感类问题】若用户问的是场景推荐（如吃饭、散步、约会、拍照、赏花、学习等），只根据系统筛选出的植物、学院或食堂 POI 推荐地点，并说明推荐理由
 5. 【学院位置】若用户询问学院、书院、研究院或楼宇在哪里，只回答其校区、建筑名和地址；不要编造路线、楼层或附近植物
@@ -3267,6 +3339,18 @@ def chat():
 
     result['locations'] = locations
     result['ranked_places'] = ranked_places
+    plant_location_response = direct_plant_location_requested or bool(
+        locations and all(location.get('kind') == 'plant' for location in locations)
+        and re.search(r'在哪里|在哪|位置|地点|地图|显示|分布', user_query or '')
+    )
+    if plant_location_response:
+        choices = result.setdefault('choices', [])
+        if not choices:
+            choices.append({})
+        choices[0]['message'] = {
+            'role': 'assistant',
+            'content': build_direct_plant_location_reply(plants, direct_plant_campus),
+        }
     if data.get('recommendationMode') == 'sakde':
         result['recommendation_engine'] = 'rule'
         if heatmap_fallback:
