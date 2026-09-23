@@ -17,6 +17,8 @@ import threading
 
 from semantic_retrieval import SemanticRetriever
 from scene_heatmaps import SCENE_IDS, HeatmapStore, HeatmapUnavailable, heatmap_chat_response, register_heatmap_routes
+from itinerary import (build_chat_reply, build_itinerary_context, is_itinerary_query,
+                       plan_day, render_fallback_text)
 
 _BASE = os.path.dirname(__file__)
 load_dotenv(os.path.join(_BASE, '../../.env'))
@@ -102,9 +104,35 @@ except (OSError, ValueError, json.JSONDecodeError) as exc:
     print(f'Unable to load emotion data: {exc}')
     _EMOTIONS = []
 
+# DeepSeek 配置只从根目录 .env 读取，密钥不会进入前端。
 DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY', '')
-DEEPSEEK_API_URL = os.getenv('DEEPSEEK_API_URL', 'https://api.deepseek.com/v1/chat/completions')
+DEEPSEEK_API_URL = os.getenv(
+    'DEEPSEEK_API_URL',
+    'https://api.deepseek.com/v1/chat/completions'
+)
 DEEPSEEK_MODEL = os.getenv('DEEPSEEK_MODEL', 'deepseek-chat')
+
+# 当前版本固定使用 DeepSeek。未配置密钥时明确返回未配置，
+# 不再静默切换到其他服务商，避免调用方误判实际的数据流向。
+def resolve_llm():
+    if not DEEPSEEK_API_KEY or not DEEPSEEK_API_URL or not DEEPSEEK_MODEL:
+        return None
+    return {
+        'label': 'DeepSeek',
+        'name': 'deepseek',
+        'api_key': DEEPSEEK_API_KEY,
+        'api_url': DEEPSEEK_API_URL,
+        'model': DEEPSEEK_MODEL,
+    }
+
+
+# 大模型与高德都是国内服务，默认**直连**：显式把两个代理都置为 None，避免被系统的
+# 代理设置带偏。Clash 等工具会把 Windows 系统代理注册成 `https://127.0.0.1:7897`，
+# requests 会把它当成 TLS 代理去连，抛 SSLEOFError，表现为"AI 服务请求失败"。
+# 若网络环境确实必须走代理，在 .env 里配置 LLM_HTTP_PROXY=http://127.0.0.1:7897。
+_LLM_PROXY = os.getenv('LLM_HTTP_PROXY', '').strip()
+_LLM_PROXIES = ({'http': _LLM_PROXY, 'https': _LLM_PROXY} if _LLM_PROXY
+                else {'http': None, 'https': None})
 
 
 DB_CONFIG = {
@@ -483,7 +511,9 @@ def build_plant_context(plants: list, campus_filter=None,
             if re.search(r'[一-鿿]', location) and location not in precise:
                 precise.append(location)
         building = _TREE_LOCATIONS.get(p['name'], [])
-        if campus_filter and precise:
+        if direct_location:
+            lines.append(f"  地图点位数：{len(coords)}（具体位置请查看地图标记，不要在回答中逐条罗列地址或距离）")
+        elif campus_filter and precise:
             lines.append(f"  {campus_filter}校区位置：{'、'.join(precise[:3])}")
         elif campus_filter:
             lines.append(f"  {campus_filter}校区位置：暂无具体位置记录")
@@ -505,6 +535,60 @@ def build_plant_context(plants: list, campus_filter=None,
         else:
             lines.append("  校园位置：暂无具体位置记录")
     return '\n'.join(lines)
+
+
+def build_direct_plant_location_reply(plants: list, campus_filter=None) -> str:
+    """为具体植物位置查询生成稳定的简短说明，位置明细交给地图展示。"""
+    def intro_for(name, plant):
+        intro = (plant.get('habit') or '').strip()
+        if not intro:
+            blocks = plant.get('blocks') or []
+            intro = next((str(block.get('content', '')).strip()
+                          for block in blocks if block.get('content')), '')
+        if intro and len(intro.strip('。；，、 ')) >= 8:
+            return intro[:55].rstrip('，。；、') + '。'
+        if '竹' in name:
+            return '竹类植物枝叶挺拔、形态清秀，四季都很有辨识度，常用于营造清幽的校园绿化景观。'
+        if any(word in name for word in ('樱', '梅', '桃', '桂', '玉兰', '荷', '菊')):
+            return '这类植物观赏性较强，花色和姿态会随季节变化，适合在校园里观察花期和景观效果。'
+        if any(word in name for word in ('松', '柏', '杉', '榆', '槐', '银杏')):
+            return '这类木本植物树形和枝叶都很有辨识度，季节变化明显，适合观察树冠形态和叶色变化。'
+        return '这是校园绿化中的常见植物，具有一定的观赏价值，可结合叶形、树形和季节变化进行观察。'
+
+    sections = []
+    if len(plants or []) > 1:
+        merged_coords = {
+            (round(coord.get('lng', 0), 6), round(coord.get('lat', 0), 6))
+            for plant in plants or []
+            for coord in _TREE_COORDS.get(plant.get('name'), [])
+            if not campus_filter or _campus(coord.get('lng'), coord.get('lat')) == campus_filter
+        }
+        names = [plant.get('name') or '' for plant in plants]
+        label = '竹类植物' if names and all('竹' in name for name in names) else '相关植物'
+        scope = f'{campus_filter}校区' if campus_filter else '校园内'
+        intro = intro_for(names[0], plants[0]) if names else '可结合叶形、树形和季节变化观察。'
+        location_text = f'{scope}已标注 {len(merged_coords)} 个点位' if merged_coords else f'{scope}暂无可靠的具体位置记录'
+        return f'{label}：{location_text}。{intro} 左侧地图已标注相关位置，点击标记可查看详情和导航 🗺️'
+
+    for plant in plants or []:
+        name = plant.get('name') or '该植物'
+        coords = [
+            coord for coord in _TREE_COORDS.get(name, [])
+            if not campus_filter or _campus(coord.get('lng'), coord.get('lat')) == campus_filter
+        ]
+        unique_points = {(round(coord.get('lng', 0), 6), round(coord.get('lat', 0), 6))
+                         for coord in coords}
+        count = len(unique_points)
+        intro = intro_for(name, plant)
+        scope = f'{campus_filter}校区' if campus_filter else '校园内'
+        location_text = f'{scope}已标注 {count} 个点位' if count else f'{scope}暂无可靠的具体位置记录'
+        detail = f'{name}：{location_text}。'
+        if intro:
+            detail += f' {intro}'
+        sections.append(detail)
+    if not sections:
+        return '地图已标注相关植物位置，请点击地图标记查看详情。'
+    return '；'.join(sections) + ' 左侧地图已标注相关位置，点击标记可查看详情和导航 🗺️'
 
 
 def search_colleges(query: str, top_k: int = 5) -> list:
@@ -1176,6 +1260,23 @@ def _direct_location_plant_names(query: str, plants: list) -> list:
     return matched
 
 
+def _plant_candidates_from_location_query(query: str) -> list:
+    """从已有植物坐标名称补充检索结果，覆盖模板中未收录的植物俗称。"""
+    terms = _query_terms(query)
+    terms |= {term[:-1] for term in terms if len(term) >= 2 and term[-1] in '子树花草'}
+    if '竹' in (query or ''):
+        terms.add('竹')
+    candidates = []
+    for name in _TREE_COORDS:
+        normalized = re.sub(r'[^一-鿿A-Za-z0-9]', '', name).lower()
+        if any(len(term) >= 2 and term.lower() in normalized for term in terms):
+            candidates.append({'name': name, 'habit': ''})
+    if not candidates and '竹' in (query or ''):
+        candidates = [{'name': name, 'habit': ''}
+                      for name in _TREE_COORDS if '竹' in name]
+    return candidates
+
+
 def _is_direct_plant_location_query(query: str, plants: list, colleges: list,
                                     institution_location_requested: bool) -> bool:
     if not plants or colleges or institution_location_requested or _wants_nearby_plants(query):
@@ -1187,10 +1288,12 @@ def _is_direct_plant_location_query(query: str, plants: list, colleges: list,
         r'有没有|是否有|有无|能否找到|能不能找到|找得到|有.{1,12}[吗嘛么]\s*$',
         query or '',
     )
-    return bool(
-        (has_location_intent or has_existence_intent)
-        and _direct_location_plant_names(query, plants)
-    )
+    if not (has_location_intent or has_existence_intent):
+        return False
+    if _direct_location_plant_names(query, plants):
+        return True
+    # 坐标数据中存在、但植物模板没有收录的俗称（例如“竹子”）也按定位查询处理。
+    return bool(plants and all(not plant.get('blocks') and not plant.get('habit') for plant in plants))
 
 
 def _nearest_college_distance(point: dict, colleges: list):
@@ -2358,7 +2461,8 @@ def _rank_poi_groups(candidates: list, profile: dict, top_k: int,
 def rank_campus_pois(query: str, plants: list, colleges: list, top_k: int = 2,
                       institution_location_requested: bool = False,
                       preferred_campus=None,
-                      ranking_location=None) -> list:
+                      ranking_location=None,
+                      strict_campus=False) -> list:
     """统一 POI 规则评分：分类问题、筛 POI 候选，再按文本命中/密度/距离排序。"""
     if not _CAMPUS_POIS:
         return []
@@ -2377,7 +2481,8 @@ def rank_campus_pois(query: str, plants: list, colleges: list, top_k: int = 2,
         profile['intent'] == 'canteen_lookup' and profile['wants_nearby']
     ) else 300
     candidates = _poi_candidates(profile, max_distance_m)
-    if not candidates and profile.get('preferred_campus') and not profile.get('explicit_campus_filter'):
+    if (not candidates and profile.get('preferred_campus')
+            and not profile.get('explicit_campus_filter') and not strict_campus):
         profile = dict(profile)
         profile['campus_filter'] = None
         candidates = _poi_candidates(profile, max_distance_m)
@@ -2397,7 +2502,8 @@ def rank_campus_pois(query: str, plants: list, colleges: list, top_k: int = 2,
 def rank_campus_places(query: str, plants: list, colleges: list, top_k: int = 2,
                         institution_location_requested: bool = False,
                         preferred_campus=None,
-                        ranking_location=None) -> list:
+                        ranking_location=None,
+                        strict_campus=False) -> list:
     """规则评分版地点推荐：优先走统一 POI 场景配置，必要时回退到植物点聚合。"""
     if direct_configured_poi_matches(query):
         return []
@@ -2413,7 +2519,8 @@ def rank_campus_places(query: str, plants: list, colleges: list, top_k: int = 2,
         top_k=top_k,
         institution_location_requested=institution_location_requested,
         preferred_campus=preferred_campus,
-        ranking_location=ranking_location
+        ranking_location=ranking_location,
+        strict_campus=strict_campus
     )
     if poi_ranked:
         return poi_ranked
@@ -2845,6 +2952,91 @@ def change_password():
     return jsonify({'success': True})
 
 
+# ---------------------------------------------------------------------------
+# 一日行程规划：骨架由 itinerary.py 确定性编排，大模型只负责写文案
+# ---------------------------------------------------------------------------
+
+#: 每个时段取候选用的（合成查询, 来源场景）。合成查询里**不写校区名**，
+#: 校区一律由 preferred_campus 参数决定，避免与用户实际询问的校区冲突。
+_ITINERARY_PERIOD_QUERIES = (
+    ('morning', (('校园里适合散步的地方', 'walk'),
+                 ('校园里适合拍照的地方', 'photo'))),
+    ('noon', (('校园里吃饭的食堂餐厅', 'dining'),)),
+    ('afternoon', (('校园里哪里适合赏花', 'flower_viewing'),
+                   ('校园里适合拍照的景点', 'photo'),
+                   ('校园里适合安静自习的地方', 'study'))),
+)
+
+_ITINERARY_SYSTEM_PROMPT = (
+    '你是华东师范大学校园导览助手。用户第一次来校，需要一份一日行程。'
+    '下面给出的站点顺序、名称与推荐理由已由系统确定，你只能据此撰写自然语言行程说明，'
+    '不得新增、替换或删除地点，也不得编造营业时间、票价或未提供的任何信息。'
+    '下面没有给出的距离、耗时等数字一律不要写，也不要估算，只说"步行可达""建议骑行"这类说法。'
+    '请分上午/中午/下午三段描述，说明每站的推荐理由、建议停留时长，以及相邻两站如何前往。'
+)
+
+
+def _itinerary_summary(context: str):
+    """用当前生效的大模型生成行程文案；失败返回 None，由调用方走确定性兜底文案。"""
+    llm = resolve_llm()
+    if not llm or not context:
+        return None
+    try:
+        resp = requests.post(
+            llm['api_url'],
+            headers={'Authorization': f"Bearer {llm['api_key']}", 'Content-Type': 'application/json'},
+            json={
+                'model': llm['model'],
+                'messages': [
+                    {'role': 'system', 'content': _ITINERARY_SYSTEM_PROMPT},
+                    {'role': 'user', 'content': context},
+                ],
+                'temperature': 0.4,
+                'max_tokens': 1024,
+            },
+            timeout=30,
+            proxies=_LLM_PROXIES,
+        )
+        resp.raise_for_status()
+        content = resp.json()['choices'][0]['message']['content']
+        return content.strip() or None
+    except (requests.RequestException, KeyError, IndexError, TypeError, ValueError):
+        return None
+
+
+def _build_itinerary_reply(campus, ranking_location):
+    """编排一日行程并生成文案；站点不足时返回 None，由调用方回退到普通推荐。
+
+    候选只来自既有的规则排序结果（`rank_campus_places`），不读取也不修改
+    热力图算法与任何缓存，因此与 SAKDE 侧的演进完全解耦。
+    """
+    period_candidates = {}
+    for period, sources in _ITINERARY_PERIOD_QUERIES:
+        items = []
+        for query, scene in sources:
+            ranked = rank_campus_places(
+                query, [], [], top_k=3,
+                preferred_campus=campus,
+                ranking_location=ranking_location,
+                strict_campus=True
+            )
+            items.extend(dict(place, scene=scene) for place in ranked)
+        period_candidates[period] = items
+
+    origin = None
+    if isinstance(ranking_location, dict):
+        origin = (ranking_location.get('lng'), ranking_location.get('lat'))
+    plan = plan_day(campus, period_candidates, origin)
+    if (not plan['sufficient']
+            or any(stop.get('campus') != campus for stop in plan.get('stops', []))):
+        return None
+
+    context = build_itinerary_context(campus, plan)
+    summary = _itinerary_summary(context)
+    return build_chat_reply(
+        campus, plan, summary or render_fallback_text(campus, plan), fallback=summary is None)
+
+
 @app.route("/api/chat", methods=["POST"])
 @rate_limit(30)
 def chat():
@@ -2860,6 +3052,7 @@ def chat():
 
     # 检索相关植物、学院位置和植树留言
     plants = search_plants(user_query)
+    location_plant_candidates = plants or _plant_candidates_from_location_query(user_query)
     colleges = search_colleges(user_query)
     named_location_plants = _direct_location_plant_names(user_query, plants)
     institution_location_requested = (
@@ -2872,11 +3065,16 @@ def chat():
         plants = []
     direct_plant_location_requested = _is_direct_plant_location_query(
         user_query,
-        plants,
+        location_plant_candidates,
         colleges,
         institution_location_requested
     )
-    direct_plant_names = named_location_plants if direct_plant_location_requested else []
+    if direct_plant_location_requested and not plants:
+        plants = location_plant_candidates
+    direct_plant_names = (_direct_location_plant_names(user_query, plants)
+                          if direct_plant_location_requested else [])
+    if direct_plant_location_requested and not direct_plant_names and plants is location_plant_candidates:
+        direct_plant_names = [plant.get('name') for plant in plants if plant.get('name')]
     if direct_plant_names:
         plants = [plant for plant in plants if plant.get('name') in direct_plant_names]
     direct_plant_campus = None
@@ -2916,6 +3114,20 @@ def chat():
             'ranked_places': [],
             'unsupported': True,
         })
+
+    # 一日行程规划：用纯规则判定意图，优先于下面的 SAKDE 场景分支；命中即直接返回，
+    # 未命中的查询完全走原逻辑。它与场景热图同属"新模式"的能力，因此同样只在用户主动
+    # 选择 sakde 时接管，保证常规导航（默认路径）的行为与过去完全一致；站点不足时记一条
+    # 提示，交给下面的普通推荐继续回答（与 heatmap_status 同一范式）。
+    itinerary_status = None
+    if (data.get('recommendationMode') == 'sakde' and not direct_pois
+            and not direct_plant_location_requested and not institution_location_requested
+            and is_itinerary_query(user_query)):
+        itinerary_campus = _campus_filter_from_query(user_query) or preferred_campus or '普陀'
+        itinerary_reply = _build_itinerary_reply(itinerary_campus, ranking_location)
+        if itinerary_reply:
+            return jsonify(itinerary_reply)
+        itinerary_status = '一日行程的可用地点不足，已改为按单场景推荐'
 
     # 第二阶段只接管主动选择 sakde 的四类宽泛场景。旧请求默认走原逻辑，
     # 精确地点、指定植物、学院附近和停车/餐饮查询均不改变。
@@ -2978,7 +3190,7 @@ def chat():
 
 【回答规则】
 1. 【禁止编造位置】只能使用下方数据中明确出现的位置，绝对不能补充、推测或编造任何数据中没有的位置信息
-2. 【位置格式】回答精确位置时按数据回答；回答系统推荐地点时必须覆盖下方提供的全部 Top 地点；只有植物大量点位查询才列出 2~3 个代表性位置。末尾可加一句"左侧地图已标注相关位置，点击标记可导航 🗺️"
+2. 【位置格式】具体植物位置查询只概括校区和地图点位数量，配合植物简介即可；不要逐条罗列多个地址、不要输出距离，也不要只挑一个点位冒充全部结果。末尾可加一句"左侧地图已标注相关位置，点击标记可导航 🗺️"
 3. 【无位置记录】若数据中某植物没有位置记录，只说"暂无具体位置记录"，不做任何补充猜测
 4. 【场景/情感类问题】若用户问的是场景推荐（如吃饭、散步、约会、拍照、赏花、学习等），只根据系统筛选出的植物、学院或食堂 POI 推荐地点，并说明推荐理由
 5. 【学院位置】若用户询问学院、书院、研究院或楼宇在哪里，只回答其校区、建筑名和地址；不要编造路线、楼层或附近植物
@@ -3016,20 +3228,22 @@ def chat():
     if emotion_context:
         system_content += '\n' + emotion_context
 
-    if not DEEPSEEK_API_KEY:
+    llm = resolve_llm()
+    if not llm:
         return jsonify({'error': 'AI 服务尚未配置'}), 503
 
     try:
         resp = requests.post(
-            DEEPSEEK_API_URL,
-            headers={'Authorization': f'Bearer {DEEPSEEK_API_KEY}', 'Content-Type': 'application/json'},
+            llm['api_url'],
+            headers={'Authorization': f"Bearer {llm['api_key']}", 'Content-Type': 'application/json'},
             json={
-                'model': DEEPSEEK_MODEL,
+                'model': llm['model'],
                 'messages': [{'role': 'system', 'content': system_content}] + messages,
                 'temperature': 0.3,
                 'max_tokens': 1024,
             },
-            timeout=30
+            timeout=30,
+            proxies=_LLM_PROXIES,
         )
         resp.raise_for_status()
         result = resp.json()
@@ -3125,10 +3339,24 @@ def chat():
 
     result['locations'] = locations
     result['ranked_places'] = ranked_places
+    plant_location_response = direct_plant_location_requested or bool(
+        locations and all(location.get('kind') == 'plant' for location in locations)
+        and re.search(r'在哪里|在哪|位置|地点|地图|显示|分布', user_query or '')
+    )
+    if plant_location_response:
+        choices = result.setdefault('choices', [])
+        if not choices:
+            choices.append({})
+        choices[0]['message'] = {
+            'role': 'assistant',
+            'content': build_direct_plant_location_reply(plants, direct_plant_campus),
+        }
     if data.get('recommendationMode') == 'sakde':
         result['recommendation_engine'] = 'rule'
         if heatmap_fallback:
             result['heatmap_status'] = heatmap_fallback
+        if itinerary_status:
+            result['itinerary_status'] = itinerary_status
     return jsonify(result)
 
 

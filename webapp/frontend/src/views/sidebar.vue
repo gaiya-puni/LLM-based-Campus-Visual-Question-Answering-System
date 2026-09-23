@@ -9,8 +9,8 @@
 
     <el-radio-group v-model="isCollapse" style="margin-bottom: 20px">
 
-        <el-radio-button :label="false">显示</el-radio-button>
-        <el-radio-button :label="true">隐藏</el-radio-button>
+        <el-radio-button :value="false">显示</el-radio-button>
+        <el-radio-button :value="true">隐藏</el-radio-button>
     </el-radio-group>
     <el-menu :default-active="route.path" class="el-menu-vertical-demo" :collapse="isCollapse" :router="true">
         <el-menu-item index="/index">
@@ -39,7 +39,7 @@
         </el-menu-item>
         <el-menu-item index="/chatbot">
             <el-icon>
-                <Brain />
+                <ChatDotRound />
             </el-icon>
             <template #title>智能问答</template>
         </el-menu-item>

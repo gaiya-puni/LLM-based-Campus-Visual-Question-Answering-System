@@ -3,9 +3,9 @@
         <!-- 左侧选择框 -->
         <div>
             <el-radio-group v-model="radio1" size="large">
-                <el-radio-button label="植物类型" />
-                <el-radio-button label="领养情况" />
-                <el-radio-button label="植物三维" />
+                <el-radio-button value="植物类型" label="植物类型" />
+                <el-radio-button value="领养情况" label="领养情况" />
+                <el-radio-button value="植物三维" label="植物三维" />
             </el-radio-group>
         </div>
 

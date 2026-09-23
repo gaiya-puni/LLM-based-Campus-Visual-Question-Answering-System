@@ -1,24 +1,24 @@
 <template>
     <div style="margin-top: 20px;">
             <el-radio-group v-model="school" size="large" @change="handleCampusChange">
-                <el-radio-button label="中北" />
-                <el-radio-button label="闵行" />
+                <el-radio-button value="中北" label="中北" />
+                <el-radio-button value="闵行" label="闵行" />
             </el-radio-group>
             <el-radio-group v-model="iconkind" size="large" style="margin-left: 80px;" @change="IconChange">
-                <el-radio-button label="全部" />
-                <el-radio-button label="灌木" />
-                <el-radio-button label="藤本" />
-                <el-radio-button label="草本" />
-                <el-radio-button label="乔木" />
+                <el-radio-button value="全部" label="全部" />
+                <el-radio-button value="灌木" label="灌木" />
+                <el-radio-button value="藤本" label="藤本" />
+                <el-radio-button value="草本" label="草本" />
+                <el-radio-button value="乔木" label="乔木" />
             </el-radio-group>
             <el-radio-group v-model="select" size="large" style="margin-left: 80px;" @change="SelectedChange">
-                <el-radio-button label="全部" />
-                <el-radio-button label="已认领" />
-                <el-radio-button label="未认领" />
+                <el-radio-button value="全部" label="全部" />
+                <el-radio-button value="已认领" label="已认领" />
+                <el-radio-button value="未认领" label="未认领" />
             </el-radio-group>
             <el-radio-group v-model="model" size="large" style="margin-left: 80px;" @change="ModelChange">
-                <el-radio-button label="地图" />
-                <el-radio-button label="植物库" />
+                <el-radio-button value="地图" label="地图" />
+                <el-radio-button value="植物库" label="植物库" />
             </el-radio-group>
     </div>
 </template>

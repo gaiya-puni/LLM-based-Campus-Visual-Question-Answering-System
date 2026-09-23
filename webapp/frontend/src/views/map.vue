@@ -26,6 +26,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick } from 'vue';
 import emitter from "../bus";
+import { loadAMap } from "../amap";
 import topbar from "./topbar.vue";
 import TryJson from '../assets/try.json';
 import plantcard from './plantcard.vue';
@@ -125,7 +126,15 @@ emitter.on('selectedChange', onSelectedChange);
 emitter.on('iconChange', onIconChange);
 emitter.on('modelChange', onModelChange);
 
-onMounted(() => nextTick(initMap));
+// index.html 用 async 引入高德脚本，必须等它就绪再建图，否则 window.AMap 可能还是 undefined。
+onMounted(() => nextTick(async () => {
+    try {
+        await loadAMap();
+        initMap();
+    } catch (err) {
+        console.error('高德地图加载失败：', err);
+    }
+}));
 
 onUnmounted(() => {
     emitter.off('campusChange', onCampusChange);
