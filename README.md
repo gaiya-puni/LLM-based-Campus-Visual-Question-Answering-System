@@ -24,11 +24,19 @@
 步骤1.开命令行开启后端
 ```powershell
 Copy-Item .env.example .env
-# 编辑 .env，填写已轮换的 DeepSeek/MySQL/讯飞配置
+# 编辑 .env：选择大模型服务商（LLM_PROVIDER=deepseek 或 chatecnu）并填写 MySQL/讯飞配置
 cd webapp/backend
 pip install -r requirements.txt
 python server.py
 ```
+
+**大模型服务商**：默认 `deepseek`，也可改用华东师范大学的 `chatecnu` —— 两者都是 OpenAI 兼容
+接口，调用代码完全复用，只需在 `.env` 里切换 `LLM_PROVIDER`。`deepseek` 读 `DEEPSEEK_API_KEY`
+/ `DEEPSEEK_API_URL` / `DEEPSEEK_MODEL`，`chatecnu` 读 `CHATECNU_API_KEY` / `CHATECNU_API_URL`
+/ `CHATECNU_MODEL`（URL 与模型名都有默认值，只有密钥必须自己填）。
+
+**选中的服务商没有配密钥时，`/api/chat` 会明确返回“AI 服务尚未配置”，不会自动切换到另一个
+服务商**，避免调用方误判数据流向。后端启动时会在控制台打印当前生效的服务商与模型名，便于排查。
 
 仓库不包含密钥。`.env` 已被 Git 忽略，禁止把真实凭据写回源码或提交到仓库。
 仓库已包含当前数据对应的语义向量索引；只有 POI 或场景语料变化时才需要运行 `build_semantic_index.py` 重新生成。

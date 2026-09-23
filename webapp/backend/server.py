@@ -104,26 +104,82 @@ except (OSError, ValueError, json.JSONDecodeError) as exc:
     print(f'Unable to load emotion data: {exc}')
     _EMOTIONS = []
 
-# DeepSeek 配置只从根目录 .env 读取，密钥不会进入前端。
-DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY', '')
-DEEPSEEK_API_URL = os.getenv(
-    'DEEPSEEK_API_URL',
-    'https://api.deepseek.com/v1/chat/completions'
-)
-DEEPSEEK_MODEL = os.getenv('DEEPSEEK_MODEL', 'deepseek-chat')
-
-# 当前版本固定使用 DeepSeek。未配置密钥时明确返回未配置，
-# 不再静默切换到其他服务商，避免调用方误判实际的数据流向。
-def resolve_llm():
-    if not DEEPSEEK_API_KEY or not DEEPSEEK_API_URL or not DEEPSEEK_MODEL:
-        return None
-    return {
+# 大模型服务商注册表。DeepSeek 与 ChatECNU 都提供 OpenAI 兼容的 /chat/completions，
+# 响应结构一致（choices[0].message.content），因此调用与解析代码完全复用。
+# 这里只登记"读哪些环境变量"，取值在 resolve_llm() 里进行——它是纯函数，便于单测。
+LLM_PROVIDERS = {
+    'deepseek': {
         'label': 'DeepSeek',
-        'name': 'deepseek',
-        'api_key': DEEPSEEK_API_KEY,
-        'api_url': DEEPSEEK_API_URL,
-        'model': DEEPSEEK_MODEL,
+        'api_key_env': 'DEEPSEEK_API_KEY',
+        'api_url_env': 'DEEPSEEK_API_URL',
+        'api_url_default': 'https://api.deepseek.com/v1/chat/completions',
+        'model_env': 'DEEPSEEK_MODEL',
+        'model_default': 'deepseek-chat',
+    },
+    'chatecnu': {
+        'label': 'ChatECNU',
+        'api_key_env': 'CHATECNU_API_KEY',
+        'api_url_env': 'CHATECNU_API_URL',
+        'api_url_default': 'https://chat.ecnu.edu.cn/open/api/v1/chat/completions',
+        'model_env': 'CHATECNU_MODEL',
+        'model_default': 'ecnu-plus',
+    },
+}
+
+DEFAULT_LLM_PROVIDER = 'deepseek'
+
+
+def _provider_config(name: str, source) -> dict:
+    entry = LLM_PROVIDERS[name]
+    return {
+        'label': entry['label'],
+        'name': name,
+        'api_key': (source.get(entry['api_key_env']) or '').strip(),
+        'api_url': (source.get(entry['api_url_env']) or entry['api_url_default']).strip(),
+        'model': (source.get(entry['model_env']) or entry['model_default']).strip(),
     }
+
+
+def selected_llm_provider(source=None) -> str:
+    """当前选择的（小写）服务商名。未设置 LLM_PROVIDER 时用默认值。"""
+    return ((source or os.environ).get('LLM_PROVIDER') or DEFAULT_LLM_PROVIDER).strip().lower()
+
+
+def resolve_llm(env=None):
+    """返回当前生效的服务商配置；未配置（或服务商名无效）时返回 None。
+
+    服务商由 .env 的 LLM_PROVIDER 显式选择（deepseek / chatecnu）。**不会静默回退**：
+    选中的服务商缺少密钥时一律视为未配置，避免调用方误判实际的数据流向。
+    env 参数仅用于单测注入，默认读进程环境变量。
+    """
+    source = os.environ if env is None else env
+    name = selected_llm_provider(source)
+    if name not in LLM_PROVIDERS:
+        return None
+    config = _provider_config(name, source)
+    if not config['api_key'] or not config['api_url'] or not config['model']:
+        return None
+    return config
+
+
+def log_llm_setup(source=None):
+    """启动时打印一次当前服务商与模型，便于部署者排查；绝不打印密钥。"""
+    source = os.environ if source is None else source
+    name = selected_llm_provider(source)
+    if name not in LLM_PROVIDERS:
+        print(f'LLM_PROVIDER="{name}" 不是已知服务商，可选：'
+              f'{"、".join(LLM_PROVIDERS)}；请在 .env 中修正。')
+        return
+    config = _provider_config(name, source)
+    if not config['api_key']:
+        key_env = LLM_PROVIDERS[name]['api_key_env']
+        print(f'{config["label"]} 未配置密钥（{key_env}），'
+              '/api/chat 将返回"AI 服务尚未配置"。')
+        return
+    print(f'LLM provider: {config["label"]} ({name}) model={config["model"]}')
+
+
+log_llm_setup()
 
 
 # 大模型与高德都是国内服务，默认**直连**：显式把两个代理都置为 None，避免被系统的
