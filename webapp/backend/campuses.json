@@ -1,0 +1,84 @@
+{
+  "brand": {
+    "appTitle": "校园可视可答系统",
+    "assistantName": "校园导览助手",
+    "logo": ""
+  },
+  "schools": {
+    "ecnu": {
+      "name": "华东师范大学",
+      "enName": "ECNU",
+      "aliases": [
+        "华东师大",
+        "华师大"
+      ],
+      "stopWords": [
+        "华东",
+        "师范"
+      ]
+    },
+    "sjtu": {
+      "name": "上海交通大学",
+      "enName": "SJTU",
+      "aliases": [
+        "上海交大",
+        "交大"
+      ],
+      "stopWords": [
+        "上海",
+        "交通"
+      ]
+    }
+  },
+  "defaultCampus": "交大闵行",
+  "campuses": [
+    {
+      "name": "普陀",
+      "slug": "putuo",
+      "school": "ecnu",
+      "aliases": [
+        "中北",
+        "中北校区",
+        "中山北路",
+        "中山北路校区"
+      ],
+      "center": [
+        121.406079,
+        31.227073
+      ],
+      "trustRadiusM": 1300,
+      "waterName": "丽娃河"
+    },
+    {
+      "name": "闵行",
+      "slug": "minhang",
+      "school": "ecnu",
+      "aliases": [
+        "闵行校区",
+        "紫竹"
+      ],
+      "center": [
+        121.453725,
+        31.03148
+      ],
+      "trustRadiusM": 2200,
+      "waterName": "樱桃河"
+    },
+    {
+      "name": "交大闵行",
+      "slug": "sjtu_minhang",
+      "school": "sjtu",
+      "aliases": [
+        "交大闵行校区",
+        "闵行本部",
+        "闵行本部校区"
+      ],
+      "center": [
+        121.436882,
+        31.025626
+      ],
+      "trustRadiusM": 1800,
+      "waterName": "思源湖"
+    }
+  ]
+}

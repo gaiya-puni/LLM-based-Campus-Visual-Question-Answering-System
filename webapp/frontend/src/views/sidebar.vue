@@ -43,12 +43,19 @@
             </el-icon>
             <template #title>智能问答</template>
         </el-menu-item>
+        <el-menu-item index="/place-review">
+            <el-icon>
+                <DocumentChecked />
+            </el-icon>
+            <template #title>数据审核</template>
+        </el-menu-item>
     </el-menu>
 </template>
 
 <script setup lang="ts">
 import { ref } from "vue"
 import { useRoute } from "vue-router";
+
 const route = useRoute();
 
 const isCollapse = ref(false)

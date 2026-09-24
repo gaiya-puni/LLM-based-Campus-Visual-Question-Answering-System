@@ -8,6 +8,7 @@ from flask_login import LoginManager, UserMixin, login_user
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
 import pymysql
+import hmac
 import json
 import math
 import os
@@ -15,6 +16,9 @@ import requests
 import re
 import threading
 
+import campus_config
+import place_extraction
+import userdata_store
 from semantic_retrieval import SemanticRetriever
 from scene_heatmaps import SCENE_IDS, HeatmapStore, HeatmapUnavailable, heatmap_chat_response, register_heatmap_routes
 from itinerary import (build_chat_reply, build_itinerary_context, is_itinerary_query,
@@ -756,7 +760,12 @@ def _looks_like_institution_location_query(query: str) -> bool:
         return False
     has_institution = re.search(r'学院|书院|学部|研究院|实验室|中心|楼|馆|系', query)
     has_campus_location = re.search(r'校区', query)
-    has_location_intent = re.search(r'哪里|在哪|位置|地址|坐标|怎么去|导航|路线', query)
+    # "位置"和"路线"都是高频泛词：'从我看到的这个位置出发，规划一下普陀校区的参观路线' 里
+    # 只要有"校区"+任一泛词，就会判成"机构位置查询"（随后 `rank_campus_places` 直接返回空），
+    # 问句既拿不到点位、也进不了行程链路。因此只认确切的问法：位置（在什么位置 / 的位置 /
+    # 位置在哪）与真正的导航请求（怎么去 / 导航），不认孤立的"这个位置""参观路线"。
+    has_location_intent = re.search(
+        r'哪里|在哪|什么位置|位置在哪|的位置|地址|坐标|怎么去|导航', query)
     return bool((has_institution or has_campus_location) and has_location_intent)
 
 
@@ -1001,6 +1010,12 @@ def _ranking_location_from_request(data: dict):
         lng = float(lng)
         lat = float(lat)
     except (TypeError, ValueError, AttributeError):
+        return None
+    # 坐标必须有限且在合理量级（口径同 `view_center_from_request`）。NaN 会让所有距离比较
+    # 恒为假，最终在 `round(nan)` 处抛 ValueError，/api/chat 直接 500——入参脏值必须挡在这里。
+    if not (math.isfinite(lng) and math.isfinite(lat)):
+        return None
+    if not (73.0 <= lng <= 136.0 and 3.0 <= lat <= 54.0):
         return None
     campus = _normalize_campus(location.get('campus')) or _campus(lng, lat)
     return {
@@ -3009,6 +3024,198 @@ def change_password():
 
 
 # ---------------------------------------------------------------------------
+# 用户共建接口：消息级反馈、地点上报、待审清单、审核与导出
+# 只做"收集 + 审核 + 导出"；并入正式 POI 仍走 tools/campus_generator 的离线确认流程。
+# ---------------------------------------------------------------------------
+
+#: 审核接口要求的最小密钥长度：太短等于没有门禁，宁可不开放
+REVIEW_TOKEN_MIN_LENGTH = 16
+
+
+def _review_token_ok() -> bool:
+    """审核态接口的门禁：请求头 `X-Review-Token` 必须等于 .env 的 `USERDATA_REVIEW_TOKEN`。
+
+    **未配置即拒绝**（而不是放行）：本地工具最容易出的问题就是"忘了配密钥"，让审核写操作
+    暴露出去。密钥只存本机 `.env`（已被 `.gitignore` 命中），不入代码、不入文档。
+    """
+    expected = (os.getenv('USERDATA_REVIEW_TOKEN') or '').strip()
+    if len(expected) < REVIEW_TOKEN_MIN_LENGTH:
+        return False
+    provided = (request.headers.get('X-Review-Token') or '').strip()
+    return hmac.compare_digest(provided, expected)
+
+
+def _review_denied():
+    return jsonify({
+        'success': False,
+        'message': (
+            f'审核接口未开启：请在 .env 配置 USERDATA_REVIEW_TOKEN（至少 {REVIEW_TOKEN_MIN_LENGTH} 位），'
+            '并在请求头 X-Review-Token 中携带同一密钥'
+        ),
+    }), 403
+
+
+@app.route('/api/feedback', methods=['POST'])
+@rate_limit(20)
+def feedback():
+    """消息级评价：有用/没用 + 可选文字理由，`none` 表示撤回先前的评价。失败只回软提示。"""
+    data = request.get_json(silent=True) or {}
+    rating = str(data.get('rating') or '').strip().lower()
+    if rating not in ('up', 'down', 'none'):
+        return jsonify({'success': False, 'message': '评价取值无效'}), 400
+    # messageId 是"评价挂在哪条回答上"的唯一依据，缺了就成了一条无法追溯的脏数据
+    message_id = str(data.get('messageId') or '').strip()
+    if not message_id:
+        return jsonify({'success': False, 'message': '缺少消息标识'}), 400
+    event = userdata_store.record_rating(
+        message_id, rating, data.get('reason') or '',
+        data.get('query') or '', data.get('messageEngine') or '', data.get('campus') or '')
+    if not event:
+        return jsonify({'success': False, 'message': '记录失败，稍后可再试'})
+    app.logger.info('userdata rating recorded rating=%s', rating)
+    return jsonify({'success': True, 'message': '已收到，谢谢反馈'})
+
+
+@app.route('/api/place_report', methods=['POST'])
+@rate_limit(10)
+def place_report():
+    """用户主动上报地点：校验名称/坐标 → 脱敏落盘 → 立即进入待确认清单。"""
+    data = request.get_json(silent=True) or {}
+    name = str(data.get('name') or '').strip()
+    if not 2 <= len(name) <= 20:
+        return jsonify({'success': False, 'message': '地点名称需为 2-20 个字符'}), 400
+    try:
+        lng, lat = float(data.get('lng')), float(data.get('lat'))
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'message': '请在地图上点选位置'}), 400
+    # 非有限值必须在这里挡掉：`float('nan')` 能让后面的距离比较全部为假、骗过校区判定，
+    # 而 NaN 一旦写进清单就变成非法 JSON，浏览器 JSON.parse 抛错、审核页整页打不开。
+    if not (math.isfinite(lng) and math.isfinite(lat)):
+        return jsonify({'success': False, 'message': '位置坐标无效，请重新在地图上点选'}), 400
+    # 校区**由坐标判定**，不采信前端传来的名字：否则界面上选着普陀、点在闵行，也会被记成普陀。
+    # 只接受落在已登记校区信任半径内的点，校外坐标一律拒绝——否则地图上会出现"没人能核实的点"。
+    campus = campus_config.campus_at(lng, lat)
+    if not campus:
+        return jsonify({'success': False, 'message': '请把位置点选在已登记的校区范围内'}), 400
+    event = userdata_store.record_place_report(
+        name, campus, lng, lat, str(data.get('category') or ''),
+        str(data.get('note') or ''), str(data.get('querySnippet') or ''))
+    if not event:
+        return jsonify({'success': False, 'message': '提交失败，请稍后再试'})
+    app.logger.info('userdata place report recorded campus=%s', campus)
+    return jsonify({
+        'success': True,
+        'message': f'已提交，感谢补充（已记到{campus}校区）',
+        'campus': campus,
+        'itemId': userdata_store.make_candidate_id(name, campus),
+        'counts': userdata_store.load_pending()['counts'],
+    })
+
+
+@app.route('/api/userdata/pending', methods=['GET'])
+@rate_limit(60)
+def userdata_pending():
+    """待审清单（审核态）：支持校区/状态/来源过滤、名称搜索与分页。"""
+    if not _review_token_ok():
+        return _review_denied()
+    payload = userdata_store.list_pending(
+        campus=request.args.get('campus') or None,
+        status=request.args.get('status') or None,
+        source=request.args.get('source') or None,
+    )
+    items = payload['items']
+    keyword = (request.args.get('q') or '').strip()
+    if keyword:
+        items = [item for item in items if keyword in (item.get('name') or '')]
+    try:
+        page = max(1, int(request.args.get('page') or 1))
+        page_size = min(max(int(request.args.get('pageSize') or 50), 1), 200)
+    except (TypeError, ValueError):
+        page, page_size = 1, 50
+    start = (page - 1) * page_size
+    return jsonify({
+        'success': True,
+        'counts': payload['counts'],
+        'stats': userdata_store.stats(),
+        'extractionMode': place_extraction.extraction_mode(),
+        'total': len(items),
+        'page': page,
+        'pageSize': page_size,
+        'items': items[start:start + page_size],
+    })
+
+
+@app.route('/api/userdata/review', methods=['POST'])
+@rate_limit(30)
+def userdata_review():
+    """审核单条候选：通过 / 驳回 / 退回待审，可带备注。"""
+    if not _review_token_ok():
+        return _review_denied()
+    data = request.get_json(silent=True) or {}
+    item_id = str(data.get('id') or '').strip()
+    status = str(data.get('status') or '').strip().lower()
+    if status not in userdata_store.STATUSES:
+        return jsonify({'success': False, 'message': '审核状态无效'}), 400
+    if not userdata_store.update_status(item_id, status, str(data.get('note') or '')):
+        return jsonify({'success': False, 'message': '清单写入失败'}), 500
+    app.logger.info('userdata review status=%s', status)
+    return jsonify({'success': True, 'counts': userdata_store.load_pending()['counts']})
+
+
+@app.route('/api/userdata/extract', methods=['POST'])
+@rate_limit(10)
+def userdata_extract():
+    """用大模型批量研判"规则判不出来"的问句（batch 模式的补齐入口，带已处理台账）。"""
+    if not _review_token_ok():
+        return _review_denied()
+    data = request.get_json(silent=True) or {}
+    try:
+        limit = min(max(int(data.get('limit') or 20), 1), 100)
+    except (TypeError, ValueError):
+        limit = 20
+    campus = str(data.get('campus') or '').strip() or None
+    scanned = userdata_store.scanned_queries()
+    queries, campus_by_query = [], {}
+    for event in userdata_store.read_events('unresolved'):
+        query = event.get('query')
+        if not query or query in scanned or query in queries:
+            continue
+        queries.append(query)
+        campus_by_query.setdefault(query, event.get('campus') or '')
+        if len(queries) >= limit:
+            break
+    if not queries:
+        return jsonify({'success': True, 'processed': 0, 'added': 0,
+                        'message': '没有待研判的问句', 'counts': userdata_store.load_pending()['counts']})
+    if not resolve_llm():
+        return jsonify({'success': False, 'message': '大模型未配置，无法研判'})
+    found = place_extraction.llm_extract(queries, campus=campus, call=_extract_llm_call)
+    # 问句落盘时已带校区：抽取结果没带校区就回填，否则候选会变成"未标校区"而难以核实
+    for item in found:
+        if not item.get('campus'):
+            item['campus'] = campus_by_query.get(item.get('query') or '') or campus or ''
+    added = userdata_store.record_extracted_places(
+        found, campus=campus, source='llm', engine='review')
+    userdata_store.record_llm_scan(queries, added=added)
+    if added:
+        userdata_store.rebuild_pending()
+    app.logger.info('userdata llm extract processed=%s added=%s', len(queries), added)
+    return jsonify({'success': True, 'processed': len(queries), 'added': added,
+                    'counts': userdata_store.load_pending()['counts']})
+
+
+@app.route('/api/userdata/export', methods=['GET'])
+@rate_limit(10)
+def userdata_export():
+    """导出已通过条目（字段对齐 POI 契约）与 Markdown 汇总。"""
+    if not _review_token_ok():
+        return _review_denied()
+    summary = userdata_store.export_approved()
+    app.logger.info('userdata export approved=%s', summary.get('approved'))
+    return jsonify({'success': True, **summary})
+
+
+# ---------------------------------------------------------------------------
 # 一日行程规划：骨架由 itinerary.py 确定性编排，大模型只负责写文案
 # ---------------------------------------------------------------------------
 
@@ -3060,11 +3267,35 @@ def _itinerary_summary(context: str):
         return None
 
 
-def _build_itinerary_reply(campus, ranking_location):
+def _itinerary_origin(campus, ranking_location, view_center):
+    """行程起点归属：优先用户定位，其次地图针尖（"从我看到的这个位置出发"）。
+
+    针尖只有**确实落在行程校区内**时才可用（`campus_config.campus_at`，超出校区的
+    信任半径即返回 None）。否则会拿另一个校区的坐标当起点，第一站莫名为远，整条行程
+    还可能被判成骑行。两者都不可用时返回 None，由 `plan_day` 从上午首个候选起步。
+    """
+    if isinstance(ranking_location, dict):
+        return ranking_location
+    if not isinstance(view_center, dict):
+        return None
+    try:
+        lng, lat = float(view_center['lng']), float(view_center['lat'])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if campus_config.campus_at(lng, lat) == campus:
+        return {'lng': lng, 'lat': lat}
+    return None
+
+
+def _build_itinerary_reply(campus, origin_location):
     """编排一日行程并生成文案；站点不足时返回 None，由调用方回退到普通推荐。
 
     候选只来自既有的规则排序结果（`rank_campus_places`），不读取也不修改
     热力图算法与任何缓存，因此与 SAKDE 侧的演进完全解耦。
+
+    `origin_location` 只决定"从哪儿出发"（起点本身不进站点列表）：它既是最近邻串联的
+    起点，也按既有口径交给 `rank_campus_places` 参与距离加权（真实定位才带 `source`
+    标记，针尖坐标不带，因此不会改变既有排序权重）。
     """
     period_candidates = {}
     for period, sources in _ITINERARY_PERIOD_QUERIES:
@@ -3073,15 +3304,15 @@ def _build_itinerary_reply(campus, ranking_location):
             ranked = rank_campus_places(
                 query, [], [], top_k=3,
                 preferred_campus=campus,
-                ranking_location=ranking_location,
+                ranking_location=origin_location,
                 strict_campus=True
             )
             items.extend(dict(place, scene=scene) for place in ranked)
         period_candidates[period] = items
 
     origin = None
-    if isinstance(ranking_location, dict):
-        origin = (ranking_location.get('lng'), ranking_location.get('lat'))
+    if isinstance(origin_location, dict):
+        origin = (origin_location.get('lng'), origin_location.get('lat'))
     plan = plan_day(campus, period_candidates, origin)
     if (not plan['sufficient']
             or any(stop.get('campus') != campus for stop in plan.get('stops', []))):
@@ -3091,6 +3322,458 @@ def _build_itinerary_reply(campus, ranking_location):
     summary = _itinerary_summary(context)
     return build_chat_reply(
         campus, plan, summary or render_fallback_text(campus, plan), fallback=summary is None)
+
+
+# ---------------------------------------------------------------------------
+# "指哪问哪"：地图中心针尖坐标进决策链
+# ---------------------------------------------------------------------------
+
+#: 指示性问句：用户问的是**眼前/屏幕中心**那个点，而不是某个已知地点名。
+#: 末行补的是口语里的"这个位置"：只收"指代眼前"的明确问法，**不收裸词**——针尖分支排在
+#: 场景/行程分支之前，若裸"这个位置"就算指示性，"这个位置适合散步吗"会被针尖抢走。
+_INDICATIVE_QUERY_PATTERN = re.compile(
+    r'这里是哪|这里是哪里|这是哪|这是哪里|这儿是哪|这儿是哪里|这是什么地方|'
+    r'我在哪|我在哪里|我现在在哪|这块是什么|这一块是什么|眼前是什么|面前是什么|'
+    r'地图上这个点|地图中心|屏幕中心|针尖|指的位置|当前这个位置|'
+    r'我看到的这个位置|看到的这个位置|这个位置是|这个位置在哪|这个位置有什么|地图上这个位置'
+)
+
+#: 缩放级别 → 查询半径（米）：地图放得越大，答得越细
+_NEEDLE_RADIUS_BY_ZOOM = ((16, 80.0), (15, 150.0), (14, 300.0))
+_NEEDLE_DEFAULT_RADIUS_M = 600.0
+
+
+def view_center_from_request(data: dict):
+    """解析地图中心（"针尖"）坐标；缺失或非法返回 None。
+
+    高德 `getCenter()` 返回的就是 GCJ-02，与全部 POI、热度缓存、距离计算同坐标系，
+    **不需要任何转换**；这里只做数值与量级校验，避免脏值把"最近 POI"算到天边。
+    """
+    raw = data.get('viewCenter')
+    if not isinstance(raw, dict):
+        return None
+    try:
+        lng = float(raw.get('lng'))
+        lat = float(raw.get('lat'))
+    except (TypeError, ValueError):
+        return None
+    if not (73.0 <= lng <= 136.0 and 3.0 <= lat <= 54.0):
+        return None
+    try:
+        zoom = float(raw.get('zoom'))
+    except (TypeError, ValueError):
+        zoom = 16.0
+    return {'lng': lng, 'lat': lat, 'zoom': zoom}
+
+
+def needle_radius_m(zoom: float) -> float:
+    """按缩放级别取查询半径：街道级只答眼前，缩小时给出片区级答案。"""
+    for threshold, radius in _NEEDLE_RADIUS_BY_ZOOM:
+        if zoom >= threshold:
+            return radius
+    return _NEEDLE_DEFAULT_RADIUS_M
+
+
+def nearest_pois(lng: float, lat: float, radius_m: float, limit: int = 3) -> list:
+    """取针尖附近最近的校园 POI（带距离）；线性扫描数千条，毫秒级。"""
+    found = []
+    for poi in _CAMPUS_POIS:
+        poi_lng, poi_lat = poi.get('lng'), poi.get('lat')
+        if not poi_lng or not poi_lat:
+            continue
+        distance = _distance_meters(lng, lat, poi_lng, poi_lat)
+        if distance > radius_m:
+            continue
+        found.append({**poi, 'distance_m': round(distance)})
+    found.sort(key=lambda item: item['distance_m'])
+    return found[:limit]
+
+
+def is_indicative_query(query: str) -> bool:
+    """问句是否指向"屏幕中心/眼前"（而非某个已知地点名）。"""
+    return bool(query) and bool(_INDICATIVE_QUERY_PATTERN.search(query))
+
+
+def needle_answer(view_center: dict) -> dict:
+    """由针尖坐标生成**确定性**回答（不调模型）：零幻觉、秒回，并给出可打点的点位。
+
+    校区一律由 `campus_at()` 按**地理**判定，**完全不看界面选中的校区**——
+    这正是"我在看哪"与"我选了哪个校区"必须分开的地方。
+    """
+    lng, lat, zoom = view_center['lng'], view_center['lat'], view_center['zoom']
+    radius_m = needle_radius_m(zoom)
+    campus = campus_config.campus_at(lng, lat)
+    pois = nearest_pois(lng, lat, radius_m, limit=3)
+    locations = [{
+        'name': poi.get('name') or '',
+        'lng': poi.get('lng'),
+        'lat': poi.get('lat'),
+        'number': poi.get('locationName') or poi.get('number') or '',
+        'campus': poi.get('campus') or campus or '',
+        'kind': 'needle',
+        'distance_m': poi.get('distance_m'),
+    } for poi in pois]
+    lines = []
+    if not campus:
+        nearest = campus_config.campus_of(lng, lat)
+        offset = campus_config.distance_m(lng, lat, *campus_config.center(nearest))
+        lines.append(f'你现在看的位置**不在已登记的校区范围内**'
+                     f'（离最近的 {nearest} 校区约 {round(offset)} 米）。')
+        lines.append('地图上不会标注未经核实的位置；把地图拖回校园里再问一次，就能看到具体地点。')
+        return {
+            'choices': [{'message': {'role': 'assistant', 'content': '\n\n'.join(lines)}}],
+            'locations': [],
+            'ranked_places': [],
+            'needle': {'campus': None, 'radiusM': radius_m, 'zoom': zoom},
+        }
+    lines.append(f'你现在看的位置在 **{campus}** 校区范围内。')
+    if pois:
+        labels = '、'.join(f"{poi.get('name')}（约 {poi.get('distance_m')} 米）" for poi in pois)
+        lines.append(f'针尖附近最近的校园地点：{labels}。')
+        if zoom < 14:
+            lines.append('把地图放大一些再问，我能答得更具体。')
+    else:
+        lines.append(f'针尖周围 {round(radius_m)} 米内没有记录到的校园地点；'
+                     '可以放大地图再问，或直接说出地点名。')
+    return {
+        'choices': [{'message': {'role': 'assistant', 'content': '\n\n'.join(lines)}}],
+        'locations': locations,
+        'ranked_places': [],
+        'needle': {'campus': campus, 'radiusM': radius_m, 'zoom': zoom},
+    }
+
+
+# ---------------------------------------------------------------------------
+# 图片输入（多模态）：附件校验、消息构造与"图中文字线索 → 地图打点"
+# ---------------------------------------------------------------------------
+
+#: 单轮最多几张图（与前端 imageAttach.ts 的 MAX_ATTACHMENTS 同口径）
+MAX_ATTACHMENTS = 2
+#: 单张图片体积上限（base64 解码后的字节）
+MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024
+#: 允许的图片类型
+ATTACHMENT_MIMES = ('image/jpeg', 'image/png', 'image/webp')
+
+
+def _base64_size(payload: str) -> int:
+    """由 base64 文本推算原始字节数（去掉 padding 补位）。"""
+    padding = 2 if payload.endswith('==') else 1 if payload.endswith('=') else 0
+    return max(0, len(payload) * 3 // 4 - padding)
+
+
+def parse_attachments(data: dict):
+    """校验请求体里的图片附件，返回 `(可用附件, 错误说明)`。
+
+    只接受 `data:image/{jpeg,png,webp};base64,...` 形式：声明的 mime 必须与 dataUrl
+    前缀一致，张数与单张体积都有上限。图片**不落盘**，日志只记张数与体积、不记内容。
+    """
+    raw = data.get('attachments')
+    if not raw:
+        return [], ''
+    if not isinstance(raw, list):
+        return [], '图片格式无效'
+    if len(raw) > MAX_ATTACHMENTS:
+        return [], f'一次最多上传 {MAX_ATTACHMENTS} 张图片'
+    items = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            return [], '图片格式无效'
+        data_url = str(entry.get('dataUrl') or '').strip()
+        mime = str(entry.get('mime') or '').strip().lower()
+        if not data_url.startswith('data:image/') or ';' not in data_url:
+            return [], '图片格式无效'
+        declared = data_url[len('data:'):data_url.index(';')].strip().lower()
+        if declared != mime or mime not in ATTACHMENT_MIMES:
+            return [], '仅支持 JPG / PNG / WebP 图片'
+        payload = data_url.split(',', 1)[1] if ',' in data_url else ''
+        if not payload:
+            return [], '图片内容为空'
+        size = _base64_size(payload)
+        if size > MAX_ATTACHMENT_BYTES:
+            return [], f'单张图片不能超过 {MAX_ATTACHMENT_BYTES // (1024 * 1024)}MB'
+        items.append({'mime': mime, 'dataUrl': data_url, 'bytes': size})
+    return items, ''
+
+
+def build_llm_messages(messages: list, attachments: list) -> list:
+    """把附件并入**最后一条用户消息**，构成 OpenAI 多模态 content 数组。
+
+    历史轮次保持字符串：图片只在当轮参与推理，否则每轮都要重发 base64，
+    token 与带宽都会失控。
+    """
+    if not attachments:
+        return messages
+    last_user = None
+    for index, message in enumerate(messages):
+        if isinstance(message, dict) and message.get('role') == 'user':
+            last_user = index
+    built = []
+    for index, message in enumerate(messages):
+        if index != last_user or not isinstance(message, dict):
+            built.append(message)
+            continue
+        text = str(message.get('content') or '').strip() or '请看这张图片。'
+        parts = [{'type': 'text', 'text': text}]
+        parts.extend({'type': 'image_url', 'image_url': {'url': item['dataUrl']}}
+                     for item in attachments)
+        built.append({**message, 'content': parts})
+    return built
+
+
+def _append_notice(result: dict, notice: str) -> None:
+    """把一条提示追加到模型回答末尾（前端按 Markdown 渲染成引用块）。"""
+    choices = result.get('choices') or []
+    if not choices or not isinstance(choices[0], dict):
+        return
+    message = choices[0].get('message') or {}
+    message['content'] = f"{message.get('content') or ''}\n\n> {notice}"
+    choices[0]['message'] = message
+
+
+#: 图中线索抽取的提示词：只要**可读**的地点名，禁止猜测
+_PHOTO_EXTRACT_PROMPT = (
+    '你是图像信息抽取器。只输出 JSON，不要解释、不要 Markdown 代码块。'
+    '格式：{"places": ["..."], "text_seen": "图中可读文字，没有就留空"}。'
+    'places 只填**图中真实可读**的校园地点名（楼名、场馆、路牌、标牌、门名、店名），'
+    '读不出来就填空数组，**禁止猜测或补全**。'
+)
+
+
+def parse_places_json(text: str) -> list:
+    """从模型返回里稳健地取出地点名列表（容忍代码块包裹与前后废话）。"""
+    if not text:
+        return []
+    start, end = text.find('{'), text.rfind('}')
+    if start < 0 or end <= start:
+        return []
+    try:
+        payload = json.loads(text[start:end + 1])
+    except ValueError:
+        return []
+    places = payload.get('places') if isinstance(payload, dict) else None
+    if not isinstance(places, list):
+        return []
+    names = []
+    for item in places:
+        name = str(item or '').strip()
+        if len(name) >= 2 and name not in names:
+            names.append(name)
+    return names[:8]
+
+
+def extract_places_from_photo(attachments: list, vision: dict) -> list:
+    """用视觉模型抽取图中可读的地点名；任何失败都返回 []（**不影响主回答**）。"""
+    content = [{'type': 'text', 'text': _PHOTO_EXTRACT_PROMPT}]
+    content.extend({'type': 'image_url', 'image_url': {'url': item['dataUrl']}}
+                   for item in attachments)
+    try:
+        resp = requests.post(
+            vision['api_url'],
+            headers={'Authorization': f"Bearer {vision['api_key']}",
+                     'Content-Type': 'application/json'},
+            json={
+                'model': vision['model'],
+                'messages': [{'role': 'user', 'content': content}],
+                'temperature': 0.0,
+                'max_tokens': 300,
+            },
+            timeout=45,
+            proxies=_LLM_PROXIES,
+        )
+        if resp.status_code != 200:
+            print(f'[photo] 图中线索抽取失败：HTTP {resp.status_code}')
+            return []
+        choices = resp.json().get('choices') or [{}]
+        message = (choices[0] or {}).get('message') or {}
+        return parse_places_json(message.get('content') or '')
+    except requests.RequestException as error:
+        print(f'[photo] 图中线索抽取请求失败：{error.__class__.__name__}')
+        return []
+    except ValueError:
+        print('[photo] 图中线索抽取返回的不是合法 JSON')
+        return []
+
+
+def build_photo_poi_context(pois: list) -> str:
+    """把"图中线索命中的校园地点"写进提示词上下文。
+
+    否则会出现自相矛盾：地图上已经标出该地点，模型却回答"资料里没有收录"。
+    """
+    if not pois:
+        return ''
+    lines = ['【图中可读文字命中的校园地点（本轮真实数据，可直接使用）】']
+    for poi in pois[:3]:
+        place = poi.get('locationName') or poi.get('number') or ''
+        lines.append(f"- {poi.get('name')}｜校区：{poi.get('campus') or ''}"
+                     + (f'｜位置：{place}' if place else ''))
+    lines.append('回答时请直接使用上述地点名与校区，不要声称未收录这些地点。')
+    return '\n'.join(lines)
+
+
+def match_pois_by_names(names: list) -> list:
+    """把抽取到的地点名匹配到校园 POI（双向包含，短名过滤），按 POI 名长度排序。"""
+    matches = []
+    seen = set()
+    for name in names:
+        candidate = str(name or '').strip()
+        # 单字候选（"楼"、"A"）会命中一大片 POI，直接跳过；这里与抽取阶段的口径一致
+        if len(candidate) < 2:
+            continue
+        for poi in _CAMPUS_POIS:
+            poi_name = str(poi.get('name') or '').strip()
+            if len(poi_name) < 2:
+                continue
+            if name not in poi_name and poi_name not in name:
+                continue
+            key = poi.get('id') or (poi_name, poi.get('lng'), poi.get('lat'))
+            if key in seen:
+                continue
+            seen.add(key)
+            matches.append(poi)
+    matches.sort(key=lambda poi: len(str(poi.get('name') or '')), reverse=True)
+    return matches[:5]
+
+
+def _image_capability_clause() -> str:
+    """prompt 的第 1 条硬性约束：图片口径**按部署能力生成**。
+
+    旧实现写死"你**没有**图像识别能力"，导致即使部署了视觉模型，助手仍对用户说
+    "我看不到图片"，并把"本部署未启用"错误表述成"模型天生不会看图"。
+    """
+    if vision_available():
+        return (
+            '1. 用户可能随消息上传图片。**只有本轮上下文里确实带了图片**才可以说你看过图；'
+            '可以描述图片内容，但**不得仅凭图片猜测地名**——只有当图中出现可读文字'
+            '（路牌、标牌、建筑名、截图文字）或与下方数据一致时才给出地点，'
+            '看不出来就直说"从图中看不出具体位置，请补充地点名"；\n'
+        )
+    return (
+        '1. 本部署未启用图片理解能力。用户提到截图、照片、图片时，如实说明'
+        '"本部署未启用图片理解，请直接用文字描述地点或问题"，'
+        '**不要**声称自己天生不具备看图能力，也不要假装看过图片；\n'
+    )
+
+
+# ---------------------------------------------------------------------------
+# 用户共建：未收录地点的静默采集（纯旁路，不改变任何回答）
+# ---------------------------------------------------------------------------
+
+#: inline 模式下抽取大模型的超时（秒）：宁可这次不判，也不能拖慢用户等待
+USERDATA_LLM_TIMEOUT_SECONDS = 6
+
+def userdata_capture_enabled() -> bool:
+    """采集总开关：`USERDATA_CAPTURE=0/false/off` 时整个未收录采集都不执行（默认开启）。
+
+    自动化测试与"不想被收集用户问句"的部署用它一次性关掉，无需改代码。
+    **每次调用都读环境变量**（不是模块常量）：同一进程里先跑测试模块、后跑功能模块也生效。
+    """
+    return (os.getenv('USERDATA_CAPTURE', 'on') or 'on').strip().lower() \
+        not in ('0', 'false', 'off', 'no')
+
+#: "用户确实在问一个地点"的闸门：只有命中它、且本轮一个点位都没给出时才采集，
+#: 避免把闲聊与纯场景问句也存进待确认清单。
+_CAPTURE_LOCATION_INTENT = re.compile(
+    r'在哪|哪里|哪边|哪栋|哪个门|怎么走|怎么去|怎么到|位置|地址|导航|叫什么|哪条路')
+
+#: 采集的兜底闸门：命中"方位词"或"疑问口吻"之一才值得记。没有它，一句"今天天气真好呀"
+#: 也会因为命中"天气"这个无数据类别而被收进未收录清单。
+_CAPTURE_QUESTION_HINT = re.compile(
+    r'吗|呢|\?|？|附近|周边|周围|有没有|能不能|多少钱|几点|怎么样|怎么卖')
+
+_KNOWN_PLACE_NAMES = None
+
+
+def _known_place_names() -> frozenset:
+    """已收录地点的归一化名称集合（名称/展示名/别名），用于把"已知地点"排除在抽取之外。
+
+    `_CAMPUS_POIS` 在导入时一次加载完毕（数千条），这里只归一化一次并缓存，之后每次采集
+    都是集合查找，不增加问答耗时。
+    """
+    global _KNOWN_PLACE_NAMES
+    if _KNOWN_PLACE_NAMES is None:
+        names = set()
+        for poi in _CAMPUS_POIS:
+            values = [poi.get('name'), poi.get('locationName')]
+            values.extend((poi.get('meta') or {}).get('aliases') or [])
+            for value in values:
+                key = place_extraction.normalize_key(value)
+                if key:
+                    names.add(key)
+        _KNOWN_PLACE_NAMES = frozenset(names)
+    return _KNOWN_PLACE_NAMES
+
+
+def _capture_campus(user_query: str, preferred_campus=None):
+    """采集用的校区：问句里显式写的优先于界面上选的（与回答口径一致）。"""
+    return _campus_filter_from_query(user_query) or preferred_campus
+
+
+def _extract_llm_call(messages):
+    """`place_extraction` 的大模型回调：沿用与行程文案相同的服务商选择与直连口径。"""
+    llm = resolve_llm()
+    if not llm:
+        return None
+    response = requests.post(
+        llm['api_url'],
+        headers={'Authorization': f"Bearer {llm['api_key']}", 'Content-Type': 'application/json'},
+        json={
+            'model': llm['model'],
+            'messages': messages,
+            'temperature': 0.0,
+            'max_tokens': 256,
+        },
+        timeout=USERDATA_LLM_TIMEOUT_SECONDS,
+        proxies=_LLM_PROXIES,
+    )
+    response.raise_for_status()
+    return response.json()['choices'][0]['message']['content']
+
+
+def _capture_unknown_place(user_query, campus=None, engine='', record_unresolved=True, extra_known=None):
+    """未收录地点采集：先规则、后大模型兜底，结果只进待确认清单。
+
+    **绝不改变本轮回答**：全程 try/except，任何失败只写一行日志（不含用户原文）并返回 None。
+    默认 batch 模式下不产生额外网络调用，只把判不出来的问句留给审核页批量研判。
+
+    `record_unresolved=False`：连"待研判问句"也不记（用于采点②，避免把场景问句堆进队列）。
+    `extra_known`：额外视为"已收录"的名字（例如本轮回答里刚刚标注过的点位）。
+    `USERDATA_CAPTURE=0/false/off` 可整体关掉采集（自动化测试与不希望被收集的部署用）。
+    """
+    if not userdata_capture_enabled():
+        return None
+    try:
+        query = (user_query or '').strip()
+        if not query or len(query) > 200:
+            return None
+        if not (_CAPTURE_LOCATION_INTENT.search(query) or _CAPTURE_QUESTION_HINT.search(query)):
+            return None
+        known_names = _known_place_names()
+        if extra_known:
+            known_names = known_names | frozenset(
+                key for key in (place_extraction.normalize_key(value) for value in extra_known) if key)
+        mode = place_extraction.extraction_mode()
+        outcome = place_extraction.extract(
+            query,
+            campus=campus,
+            known_names=known_names,
+            llm_call=_extract_llm_call if mode == 'inline' else None,
+            mode=mode,
+        )
+        if outcome['items']:
+            written = userdata_store.record_extracted_places(
+                outcome['items'], query=query, campus=campus,
+                source=outcome['via'] or 'rule', engine=engine)
+            if written:
+                userdata_store.rebuild_pending()
+                app.logger.info('userdata captured %s candidate(s) via %s', written, outcome['via'])
+            return written
+        if record_unresolved and outcome.get('deferred') and userdata_store.record_unresolved_query(
+                query, campus=campus, engine=engine):
+            app.logger.info('userdata deferred one unresolved query')
+        return 0
+    except Exception as exc:
+        app.logger.warning('userdata capture failed: %s', type(exc).__name__)
+        return None
 
 
 @app.route("/api/chat", methods=["POST"])
@@ -3105,6 +3788,11 @@ def chat():
     ranking_location = _ranking_location_from_request(data)
     configured_category_requested = bool(_intent_categories_from_query(user_query))
     direct_pois = direct_configured_poi_matches(user_query)
+    # 行程意图是**强信号**，且 `is_itinerary_query` 内部已排除精确地点查询
+    # （`_LOCATION_LOOKUP`：在哪里/怎么走/导航…）。因此它一旦命中，就应优先于"指哪问哪"
+    # 与机构位置链路——否则"从我看到的这个位置出发，规划一下普陀校区的参观路线"这类句子
+    # 里既有指示词又有"校区/位置/路线"，会被那两条链路依次抢走，行程永远接管不到。
+    itinerary_intent = is_itinerary_query(user_query)
 
     # 检索相关植物、学院位置和植树留言
     plants = search_plants(user_query)
@@ -3117,6 +3805,17 @@ def chat():
     )
     nearby_requested = bool(colleges and _wants_nearby_plants(user_query))
     nearby_plants = find_nearby_plants(colleges) if nearby_requested else []
+
+    # ---- "指哪问哪"：屏幕中心针尖坐标优先于界面选中校区 ----
+    # 触发条件刻意保守：带 viewCenter + 问句指示性 + 既有直达通道（POI/植物/学院）都没命中，
+    # 以免打断"问点名地点"的原有链路。命中后走确定性作答，不再调模型。
+    # 行程意图例外：它问的是"怎么安排一整天"，而不是"眼前这个点是什么"，因此让给行程分支。
+    view_center = view_center_from_request(data)
+    if (view_center and is_indicative_query(user_query) and not itinerary_intent
+            and not direct_pois and not plants and not colleges):
+        answer = needle_answer(view_center)
+        answer['recommendation_engine'] = 'needle'
+        return jsonify(answer)
     if colleges and institution_location_requested and not nearby_requested:
         plants = []
     direct_plant_location_requested = _is_direct_plant_location_query(
@@ -3156,6 +3855,8 @@ def chat():
 
     if unsupported_data_query:
         unsupported_label = _unsupported_data_label(user_query) or '相关地点'
+        # 采集点①：这是最典型的"问了但我们没有"——趁回答"暂无数据"时把可疑地名收进待确认清单
+        _capture_unknown_place(user_query, _capture_campus(user_query, preferred_campus), 'unsupported')
         return jsonify({
             'choices': [{
                 'message': {
@@ -3175,12 +3876,17 @@ def chat():
     # 未命中的查询完全走原逻辑。它与场景热图同属"新模式"的能力，因此同样只在用户主动
     # 选择 sakde 时接管，保证常规导航（默认路径）的行为与过去完全一致；站点不足时记一条
     # 提示，交给下面的普通推荐继续回答（与 heatmap_status 同一范式）。
+    # 这里**不再**用 `institution_location_requested` 当守卫：行程意图已由 itinerary_intent
+    # 单独判定，再叠加机构位置标志只会让"…普陀校区的参观路线"这类问句被两头落空。
+    # 起点优先用户定位，其次地图针尖——用户说"从我看到的这个位置出发"时就是后者。
     itinerary_status = None
-    if (data.get('recommendationMode') == 'sakde' and not direct_pois
-            and not direct_plant_location_requested and not institution_location_requested
-            and is_itinerary_query(user_query)):
-        itinerary_campus = _campus_filter_from_query(user_query) or preferred_campus or '普陀'
-        itinerary_reply = _build_itinerary_reply(itinerary_campus, ranking_location)
+    if (data.get('recommendationMode') == 'sakde' and itinerary_intent
+            and not direct_pois and not direct_plant_location_requested):
+        itinerary_campus = _campus_filter_from_query(user_query) or preferred_campus or campus_config.default_campus()
+        itinerary_reply = _build_itinerary_reply(
+            itinerary_campus,
+            _itinerary_origin(itinerary_campus, ranking_location, view_center)
+        )
         if itinerary_reply:
             return jsonify(itinerary_reply)
         itinerary_status = '一日行程的可用地点不足，已改为按单场景推荐'
@@ -3392,6 +4098,19 @@ def chat():
                 _campus(item['lng'], item['lat']),
                 'nearby_plant'
             )
+
+    
+
+    # 采集点②：用户在问一个**具体地名**（带方位意图），而这个名字不在已收录数据里。
+    # 闸门刻意选在"规则抽到一个干净地名"上，而不是"本轮没有点位"——后者在项目里几乎总
+    # 不成立（场景/植物兜底几乎总会给出一堆点位，例如任何问句都可能拿到 93 个打点）。
+    # 本轮已经标注过的点位名排除在外，避免"答了还记一笔"。
+    if _CAPTURE_LOCATION_INTENT.search(user_query or ''):
+        _capture_unknown_place(
+            user_query, _capture_campus(user_query, preferred_campus), 'chat',
+            record_unresolved=False,
+            extra_known=[loc.get('name') for loc in locations if loc.get('name')],
+        )
 
     result['locations'] = locations
     result['ranked_places'] = ranked_places

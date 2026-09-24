@@ -58,6 +58,14 @@ const routes = [
     },
     component: () => import("../views/chatbot.vue"),
   },
+  {
+    path: "/place-review",
+    name: "placeReview",
+    meta: {
+      title: "数据审核",
+    },
+    component: () => import("../views/placeReview.vue"),
+  },
 ];
 const router = createRouter({ history: createWebHashHistory(), routes });
 export default router;

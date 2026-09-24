@@ -20,6 +20,10 @@ __pycache__/
 venv/
 private_data/
 
+# 用户共建数据：含用户问句与上报内容，只存本机、永不入库；仅保留说明文件
+webapp/backend/userdata/*
+!webapp/backend/userdata/README.md
+
 # Jupyter
 .ipynb_checkpoints/
 

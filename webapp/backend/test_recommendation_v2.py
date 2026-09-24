@@ -133,6 +133,23 @@ def test_unsupported_category_not_downgraded():
     _assert(places == [], f'unsupported coffee query should not rank fallback places, got {places}')
 
 
+def test_generic_position_word_is_not_an_institution_location_query():
+    """"位置"是高频泛词，孤立出现（"从我看到的这个位置出发"）不该判成机构位置查询。"""
+    for query in (
+        '请从我看到的这个位置出发，请你为我规划一下普陀校区的参观路线',
+        '我在这个位置，附近有什么古树',
+    ):
+        _assert(
+            not _looks_like_institution_location_query(query),
+            f'generic 位置 wording must not become an institution location query: {query}',
+        )
+    for query in ('普陀校区在什么位置', '普陀校区的位置', '中山北路门楼在哪'):
+        _assert(
+            _looks_like_institution_location_query(query),
+            f'real location question must stay an institution location query: {query}',
+        )
+
+
 def test_parking_exact_query():
     matches = direct_configured_poi_matches('东门附近停车场在哪里')
     names = [item.get('name') for item in matches]
@@ -370,6 +387,7 @@ def run_all():
         test_flower_and_quiet_scenes,
         test_minhang_walk_uses_correct_campus_labels,
         test_unsupported_category_not_downgraded,
+        test_generic_position_word_is_not_an_institution_location_query,
         test_parking_exact_query,
         test_parking_numeric_gate_alias_query,
         test_semantic_corpus_and_evaluation_cases,
