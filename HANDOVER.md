@@ -4,6 +4,11 @@
 > 设计思路、已知坑与未来工作（含"把项目做成智能体"的路线）。
 > 组件实现细节另见 `webapp/backend/USER_DATA_PIPELINE.md`（用户共建）与 `webapp/backend/ITINERARY_PLANNING.md`（行程）。
 
+> **2026-09-28 接手补充**：三校区运行时与资产链已接通。热图构建和语义索引现在统一自动发现
+> `*_pois.json`，缓存已按当前源码重建；语义索引含 3122 条 POI。交大闵行的拍照/散步/约会热图可用，
+> 赏花因没有植物点位而明确降级，不影响其他场景。本文所述 `tools/campus_generator/` 未出现在当前仓库、
+> stash 或可见历史中，后续做 CLI 前应先向原同事取回源码；取不回再按契约重建。
+
 ---
 
 ## 0. 一句话现状
@@ -230,7 +235,8 @@ git pull
   **在本分支上跑会失败**，别误加进测试套件。
 - 本机 `.env` 需要配置 `USERDATA_REVIEW_TOKEN`（≥16 位，值不要写进任何文档/代码）才能使用审核页；
   该变量与 `USERDATA_CAPTURE`、`USERDATA_LLM_EXTRACT`、`USERDATA_DIR` 的说明已补进 `.env.example`。
-- 演示时保持 `SEMANTIC_ENABLED=false`（语义索引已过期，加载句向量模型会让后端挂起/退出）。
+- 语义索引已按当前 3122 条 POI 重建并通过运行时加载验证；建议 `SEMANTIC_ENABLED=auto`。
+  缺少模型或依赖时会自动回退关键词规则，只有排障时才需要显式设为 `false`。
 - 系统代理会让后端调不通大模型（表现为整站"AI 服务请求失败"），确需代理用 `LLM_HTTP_PROXY` 显式配置。
 
 ---
@@ -256,9 +262,9 @@ npm run dev
 
 ```powershell
 cd webapp/backend
-$env:SEMANTIC_ENABLED='false'
 python -m unittest test_campus_config test_chat_itinerary test_chat_needle test_chat_usercapture `
-    test_itinerary test_llm_config test_place_extraction test_scene_heatmaps test_security test_userdata_store
+    test_itinerary test_llm_config test_place_extraction test_scene_heatmaps test_security `
+    test_semantic_retrieval test_userdata_store
 python test_recommendation_v2.py          # 脚本式回归
 cd ../frontend; npx vue-tsc --noEmit      # 类型检查
 cd ../..; python scripts/check_publication.py   # 提交前脱敏检查（务必）

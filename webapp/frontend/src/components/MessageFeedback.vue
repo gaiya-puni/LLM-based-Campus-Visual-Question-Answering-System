@@ -6,6 +6,7 @@
         class="rating-btn"
         :class="{ selected: current === 'up' }"
         :disabled="submitting"
+        :aria-pressed="current === 'up'"
         :title="current === 'up' ? '再点一次可撤回这条评价' : '这条回答有用'"
         @click="pick('up')"
       >
@@ -21,6 +22,7 @@
         class="rating-btn"
         :class="{ selected: current === 'down' }"
         :disabled="submitting"
+        :aria-pressed="current === 'down'"
         :title="current === 'down' ? '再点一次可撤回这条评价' : '这条回答没用'"
         @click="pick('down')"
       >
@@ -32,7 +34,7 @@
         <span>没用</span>
       </button>
       <transition name="fade">
-        <span v-if="receivedTip" class="received-tip">已收到，谢谢反馈</span>
+        <span v-if="receivedTip" class="received-tip" role="status" aria-live="polite">已收到，谢谢反馈</span>
       </transition>
     </div>
 
@@ -43,6 +45,7 @@
           class="reason-input"
           rows="2"
           maxlength="200"
+          aria-label="补充这条回答的问题"
           placeholder="哪里不对？例如：地点名字错了 / 位置标偏了 / 答非所问（选填）"
         ></textarea>
         <div class="reason-actions">
@@ -52,9 +55,9 @@
             {{ submitting ? '提交中…' : '提交' }}
           </button>
         </div>
-        <p v-if="errorTip" class="error-tip">{{ errorTip }}</p>
       </div>
     </transition>
+    <p v-if="errorTip" class="error-tip" role="alert">{{ errorTip }}</p>
   </div>
 </template>
 
@@ -151,6 +154,7 @@ const cancelReason = () => {
 .rating-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   min-height: 26px;
 }

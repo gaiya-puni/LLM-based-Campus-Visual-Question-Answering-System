@@ -1,14 +1,15 @@
 {
   "model": "BAAI/bge-small-zh-v1.5",
-  "createdAt": "2026-09-20T01:16:35.956183+00:00",
-  "sourceHash": "59196d1253068ad61ef81f9efb89e496b2362db37b4f55b5b510fb25384f5b05",
+  "createdAt": "2026-09-28T14:24:50.433736+00:00",
+  "sourceHash": "34a1da2dddf8712e0d0780150fe7b0ef67ddc1a1465e058f06aa28ba22b5750b",
   "sceneCount": 6,
-  "poiCount": 3042,
+  "poiCount": 3122,
   "sourceFiles": [
     "scene_profiles.json",
     "campus_pois.json",
     "canteen_pois.json",
     "parking_pois.json",
-    "scene_pois.json"
+    "scene_pois.json",
+    "sjtu_minhang_pois.json"
   ]
 }

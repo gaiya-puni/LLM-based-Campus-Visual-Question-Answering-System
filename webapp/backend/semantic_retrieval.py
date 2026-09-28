@@ -21,6 +21,26 @@ import numpy as np
 DEFAULT_MODEL_NAME = "BAAI/bge-small-zh-v1.5"
 DEFAULT_INDEX_FILE = "semantic_index.npz"
 DEFAULT_META_FILE = "semantic_index_meta.json"
+SCENE_SOURCE_FILE = "scene_profiles.json"
+
+
+def semantic_source_paths(base_dir: Union[str, Path]) -> list[Path]:
+    """Return the deterministic source set shared by builder and runtime."""
+    base = Path(base_dir)
+    poi_paths = sorted(
+        (path for path in base.glob("*_pois.json") if path.is_file()),
+        key=lambda path: path.name,
+    )
+    return [base / SCENE_SOURCE_FILE, *poi_paths]
+
+
+def semantic_source_hash(paths: Iterable[Path]) -> str:
+    """Hash source names and contents in their canonical discovery order."""
+    digest = hashlib.sha256()
+    for path in paths:
+        digest.update(path.name.encode("utf-8"))
+        digest.update(path.read_bytes())
+    return digest.hexdigest()
 
 
 def _as_text_list(value) -> list[str]:
@@ -114,18 +134,20 @@ class SemanticRetriever:
                 self._reason = "semantic index not found; run build_semantic_index.py"
                 return
             try:
-                from sentence_transformers import SentenceTransformer
-
                 meta = json.loads(self.meta_path.read_text(encoding="utf-8"))
-                source_files = [self.base_dir / name for name in meta.get("sourceFiles", [])]
-                if not source_files or any(not path.exists() for path in source_files):
+                source_paths = semantic_source_paths(self.base_dir)
+                source_files = [path.name for path in source_paths]
+                recorded_files = meta.get("sourceFiles")
+                if recorded_files != source_files:
+                    self._reason = (
+                        "semantic index is stale: source file set changed; "
+                        "run build_semantic_index.py"
+                    )
+                    return
+                if any(not path.is_file() for path in source_paths):
                     self._reason = "semantic index source files are missing; rebuild index"
                     return
-                digest = hashlib.sha256()
-                for path in source_files:
-                    digest.update(path.name.encode("utf-8"))
-                    digest.update(path.read_bytes())
-                if meta.get("sourceHash") != digest.hexdigest():
+                if meta.get("sourceHash") != semantic_source_hash(source_paths):
                     self._reason = "semantic index is stale; run build_semantic_index.py"
                     return
                 index_model = str(meta.get("model") or "")
@@ -146,6 +168,8 @@ class SemanticRetriever:
                 # Runtime must be deterministic and must not block Flask on
                 # network retries. The builder is the only component allowed
                 # to download the configured model.
+                from sentence_transformers import SentenceTransformer
+
                 self._model = SentenceTransformer(self.model_name, local_files_only=True)
                 self._available = True
                 self._reason = "ok"

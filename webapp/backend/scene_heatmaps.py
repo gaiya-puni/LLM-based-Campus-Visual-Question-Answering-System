@@ -377,6 +377,10 @@ class HeatmapUnavailable(RuntimeError):
     pass
 
 
+class InsufficientSpatialCoverage(ValueError):
+    """A campus/scene has too few audited points to build a meaningful surface."""
+
+
 def load_config(base: Path) -> dict:
     config = json.loads((base / "heatmap_config.json").read_text(encoding="utf-8"))
     for key in ("cellMeters", "zoneMeters", "minInfluenceMeters", "maxInfluenceMeters",
@@ -398,14 +402,21 @@ def load_config(base: Path) -> dict:
     return config
 
 
+def poi_source_paths(base: Path) -> list[Path]:
+    """Return every POI dataset that can feed the heatmap builder.
+
+    Campus-specific files use the same ``*_pois.json`` convention as the
+    runtime POI loader.  Keeping discovery here makes loading and cache
+    fingerprinting share one deterministic source list, so adding a campus
+    cannot silently reuse an old cache.
+    """
+    base = Path(base)
+    return sorted(base.glob("*_pois.json"), key=lambda path: path.name)
+
+
 def source_paths(base: Path) -> list[Path]:
     paths = [base / "heatmap_config.json", base / "scene_profiles.json",
-             base / "campus_pois.json"]
-    # 散步/约会专用的非植物 POI（座椅、共青场、凉亭等）为可选文件；
-    # 存在时纳入哈希，改变内容必须重建缓存。
-    scene_pois = base / "scene_pois.json"
-    if scene_pois.exists():
-        paths.append(scene_pois)
+             *poi_source_paths(base)]
     paths.extend([base / "../../data/all_templates.json", base / "scene_heatmaps.py",
                   base / "build_scene_heatmaps.py", base / "semantic_retrieval.py"])
     return paths
@@ -582,7 +593,7 @@ def prepare_geometry(pois: list[dict], campus: str, config: dict,
                      scene: str | None = None) -> dict:
     selected = [p for p in pois if p["campus"] == campus]
     if len(selected) < 3:
-        raise ValueError(f"{campus}: insufficient spatial coverage")
+        raise InsufficientSpatialCoverage(f"{campus}: insufficient spatial coverage")
     center = config["campuses"][campus]["center"]
     xy = to_meters([[p["lng"], p["lat"]] for p in selected], center)
     cell = config["cellMeters"]
@@ -772,7 +783,13 @@ class HeatmapStore:
         self._memory = {}
 
     def get(self, campus: str, scene: str) -> dict:
-        if campus not in ("普陀", "闵行") or scene not in SCENE_IDS:
+        if scene not in SCENE_IDS:
+            raise ValueError("请选择有效校区和四类场景之一")
+        try:
+            config = load_config(self.base)
+        except (OSError, ValueError, KeyError, TypeError, AttributeError, IndexError) as exc:
+            raise HeatmapUnavailable("热力图缓存不可用，请运行 python build_scene_heatmaps.py") from exc
+        if campus not in (config.get("campuses") or {}):
             raise ValueError("请选择有效校区和四类场景之一")
         if os.getenv("HEATMAP_ENABLED", "true").lower() in {"0", "false", "off"}:
             raise HeatmapUnavailable("场景热力图已关闭")
@@ -782,7 +799,6 @@ class HeatmapStore:
             try:
                 # A missing/broken optional configuration must not prevent the
                 # original Flask service from starting or serving old requests.
-                config = load_config(self.base)
                 meta = json.loads((self.cache / "manifest.json").read_text(encoding="utf-8"))
                 current_hash = fingerprint(self.base, self.model)
                 if meta.get("sourceHash") != current_hash:
@@ -798,6 +814,12 @@ class HeatmapStore:
                             f"语义模型标识不一致（后端 {self.model}，缓存 {meta.get('model')}），"
                             "请重启后端或重建缓存")
                     raise HeatmapUnavailable("热力图缓存已过期，请运行 python build_scene_heatmaps.py")
+                skipped = (meta.get("skippedHeatmaps") or {}).get(campus) or {}
+                reason = skipped.get(scene)
+                if reason:
+                    if not isinstance(reason, str):
+                        raise ValueError("invalid skipped heatmap reason")
+                    raise HeatmapUnavailable(reason)
                 key = (current_hash, campus, scene, season)
                 if key not in self._memory:
                     slug = config["campuses"][campus]["slug"]

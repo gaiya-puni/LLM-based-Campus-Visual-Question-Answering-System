@@ -9,8 +9,9 @@ from unittest.mock import patch
 
 import numpy as np
 
+import campus_config
 import scene_heatmaps as hm
-from build_scene_heatmaps import scene_class_weight_map
+from build_scene_heatmaps import load_pois, scene_class_weight_map
 
 BASE = Path(__file__).resolve().parent
 
@@ -129,6 +130,68 @@ class HeatmapMathTests(unittest.TestCase):
         self.assertTrue(any(beta < 0 for beta in betas.values()))
         self.assertTrue(np.isfinite(field).all())
 
+    def test_poi_sources_are_sorted_and_new_campus_changes_fingerprint(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            base = project / 'webapp' / 'backend'
+            data = project / 'data'
+            base.mkdir(parents=True)
+            data.mkdir()
+            for name in ('heatmap_config.json', 'scene_profiles.json'):
+                (base / name).write_text('{}', encoding='utf-8')
+            for name in ('scene_heatmaps.py', 'build_scene_heatmaps.py',
+                         'semantic_retrieval.py'):
+                (base / name).write_text(f'# {name}\n', encoding='utf-8')
+            (data / 'all_templates.json').write_text('[]', encoding='utf-8')
+            (base / 'campus_pois.json').write_text('[{"id":"ecnu"}]', encoding='utf-8')
+            sjtu_path = base / 'sjtu_minhang_pois.json'
+            sjtu_path.write_text('[{"id":"sjtu-1"}]', encoding='utf-8')
+            (base / 'not-a-poi.json').write_text('{}', encoding='utf-8')
+
+            self.assertEqual(
+                [path.name for path in hm.poi_source_paths(base)],
+                ['campus_pois.json', 'sjtu_minhang_pois.json'],
+            )
+            before = hm.fingerprint(base, 'test-model')
+            sjtu_path.write_text('[{"id":"sjtu-2"}]', encoding='utf-8')
+            self.assertNotEqual(before, hm.fingerprint(base, 'test-model'))
+
+    def test_repository_cache_manifest_matches_current_sources(self):
+        manifest = json.loads(
+            (BASE / 'heatmap_cache' / 'manifest.json').read_text(encoding='utf-8'))
+
+        self.assertEqual(manifest['sourceHash'], hm.fingerprint(BASE, manifest['model']))
+        self.assertEqual(manifest['mapCount'], 26)
+        self.assertEqual(manifest['audit']['byCampus'], {
+            '普陀': 1515, '闵行': 1476, '交大闵行': 17,
+        })
+        self.assertEqual(
+            set((manifest.get('skippedHeatmaps') or {}).get('交大闵行') or {}),
+            {'flower_viewing'},
+        )
+
+    def test_load_pois_merges_all_discovered_files_in_order(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            (base / 'z_pois.json').write_text('[{"id":"z"}]', encoding='utf-8')
+            (base / 'a_pois.json').write_text(
+                '[{"id":"a1"},{"id":"a2"}]', encoding='utf-8')
+            (base / 'ignored.json').write_text('[{"id":"ignored"}]', encoding='utf-8')
+
+            self.assertEqual(
+                [poi['id'] for poi in load_pois(base=base)],
+                ['a1', 'a2', 'z'],
+            )
+
+    def test_load_pois_rejects_a_non_list_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            (base / 'good_pois.json').write_text('[]', encoding='utf-8')
+            (base / 'broken_pois.json').write_text('{"id":"not-a-list"}', encoding='utf-8')
+
+            with self.assertRaises(ValueError):
+                load_pois(base=base)
+
     def test_cache_missing_stale_disabled_and_copy(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -136,6 +199,8 @@ class HeatmapMathTests(unittest.TestCase):
             store = hm.HeatmapStore(root)
             with self.assertRaises(hm.HeatmapUnavailable):
                 store.get('普陀', 'walk')
+            with self.assertRaises(hm.HeatmapUnavailable):
+                store.get('交大闵行', 'walk')
             store.cache.mkdir()
             (store.cache / 'manifest.json').write_text('{"sourceHash":"old"}', encoding='utf-8')
             with patch.object(hm, 'fingerprint', return_value='new'):
@@ -159,6 +224,27 @@ class HeatmapMathTests(unittest.TestCase):
             store = hm.HeatmapStore(Path(directory))
             with self.assertRaises(hm.HeatmapUnavailable):
                 store.get('普陀', 'walk')
+
+    def test_cache_reports_manifest_skip_reason(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'heatmap_config.json').write_text(json.dumps(self.config), encoding='utf-8')
+            store = hm.HeatmapStore(root)
+            store.cache.mkdir()
+            reason = '交大闵行: insufficient spatial coverage'
+            manifest = {
+                'algorithm': hm.ALGORITHM_VERSION,
+                'model': store.model,
+                'sourceHash': 'current',
+                'skippedHeatmaps': {'交大闵行': {'flower_viewing': reason}},
+            }
+            (store.cache / 'manifest.json').write_text(
+                json.dumps(manifest, ensure_ascii=False), encoding='utf-8')
+
+            with patch.object(hm, 'fingerprint', return_value='current'):
+                with self.assertRaises(hm.HeatmapUnavailable) as raised:
+                    store.get('交大闵行', 'flower_viewing')
+            self.assertIn(reason, str(raised.exception))
 
     def test_valid_json_with_broken_grid_or_wrong_campus_is_rejected(self):
         payload = hm.build_map(hm.prepare_geometry(self.pois, '普陀', self.config), 'walk', {'甲': .8})
@@ -201,8 +287,8 @@ class HeatmapApiTests(unittest.TestCase):
         return self.client.post('/api/chat', json={
             'messages': [{'role': 'user', 'content': query}], 'userCampus': '普陀', **kwargs})
 
-    def test_new_mode_all_four_scenes_and_both_campuses(self):
-        for campus in ('普陀', '闵行'):
+    def test_new_mode_all_four_scenes_and_configured_campuses(self):
+        for campus in campus_config.campus_names():
             for word, scene in [('赏花','flower_viewing'), ('拍照','photo'), ('散步','walk'), ('约会','date')]:
                 payload = {'scene': scene, 'sceneName': word, 'campus': campus, 'disclaimer': hm.DISCLAIMER,
                            'places': [{'name': '已有点位周边', 'rank': 1, 'reason': '真实点位依据'}]}
@@ -213,6 +299,22 @@ class HeatmapApiTests(unittest.TestCase):
                 self.assertEqual(response.json['locations'], response.json['ranked_places'])
                 get.assert_called_once_with(campus, scene)
         self.post.assert_not_called()
+
+    def test_new_mode_without_scope_uses_configured_default(self):
+        campus = campus_config.default_campus()
+        payload = {
+            'scene': 'walk', 'sceneName': '散步休息', 'campus': campus,
+            'disclaimer': hm.DISCLAIMER,
+            'places': [{'name': '已有点位周边', 'rank': 1, 'reason': '真实点位依据'}],
+        }
+        with patch.object(self.server._HEATMAP_STORE, 'get', return_value=payload) as get:
+            response = self.client.post('/api/chat', json={
+                'messages': [{'role': 'user', 'content': '校园里哪里适合散步'}],
+                'recommendationMode': 'sakde',
+            })
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json.get('recommendation_engine'), 'sakde')
+        get.assert_called_once_with(campus, 'walk')
 
     def test_original_default_never_reads_heatmap(self):
         with patch.object(self.server._HEATMAP_STORE, 'get', side_effect=AssertionError('old path changed')):

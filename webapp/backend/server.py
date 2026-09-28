@@ -204,11 +204,8 @@ DB_CONFIG = {
     'charset': os.getenv('MYSQL_CHARSET', 'utf8mb4'),
 }
 
-# 普陀(中北)中心: 31.2271, 121.4061 | 闵行中心: 31.0315, 121.4537
 def _campus(lng, lat):
-    d_pt = (lng - 121.406079) ** 2 + (lat - 31.227073) ** 2
-    d_mh = (lng - 121.453725) ** 2 + (lat - 31.03148) ** 2
-    return '普陀' if d_pt < d_mh else '闵行'
+    return campus_config.campus_of(lng, lat)
 
 
 POI_REQUIRED_FIELDS = (
@@ -315,6 +312,21 @@ POI_CATEGORY_CONFIGS = {
         'contextMode': 'location',
         'contextName': '停车场',
     },
+    'scene': {
+        'groupBy': 'id',
+        'directLookup': True,
+        # 避免“图书馆在哪里”这类泛称因去掉学校前缀后命中所有校区；
+        # “包玉刚图书馆”等有辨识度的专名仍可精确直达。
+        'exactMatchMinLength': 4,
+        'exactMatchScore': 82,
+        'exactMatchReason': '命中校园地点名称',
+        'targetMatcher': 'exact',
+        'scoreCap': 75,
+        'exactScoreCap': 100,
+        'dataReason': '校园地点位置数据',
+        'contextMode': 'location',
+        'contextName': '校园地点',
+    },
 }
 
 
@@ -419,10 +431,16 @@ def _poi_exact_match_texts(poi: dict) -> list:
     return list(dict.fromkeys(str(text).strip() for text in texts if str(text).strip()))
 
 
+def _campus_filler_pattern() -> str:
+    words = campus_config.school_names() + campus_config.campus_words()
+    return '|'.join(re.escape(word) for word in sorted(set(words), key=len, reverse=True))
+
+
 _LOOKUP_FILLER_PATTERN = re.compile(
-    r'华东师范大学|华师大|普陀校区|中北校区|中山北路校区|闵行校区|'
+    rf'{_campus_filler_pattern()}|'
     r'请问|麻烦问下|帮我找找|具体|准确|地址|位置|地点|在哪里|在哪儿|在哪|怎么走|如何去|'
-    r'[\s，。！？、,.!?：:；;（）()【】\[\]“”"\'`]'
+    r'[\s，。！？、,.!?：:；;（）()【】\[\]“”"\'`]',
+    re.IGNORECASE,
 )
 
 
@@ -578,7 +596,7 @@ def build_plant_context(plants: list, campus_filter=None,
         elif campus_filter:
             lines.append(f"  {campus_filter}校区位置：暂无具体位置记录")
         elif direct_location and coords:
-            for campus in ('普陀', '闵行'):
+            for campus in campus_config.campus_names():
                 campus_locations = []
                 for coord in coords:
                     location = (coord.get('number') or '').strip()
@@ -671,8 +689,13 @@ def search_colleges(query: str, top_k: int = 5) -> list:
         '闵行', '普陀', '中北', '中山', '北路', '适合', '推荐', '赏花', '看花',
         '拍照', '摄影', '打卡', '散步', '风景', '景色'
     }
+    stop_tokens.update(word.casefold() for word in (
+        campus_config.school_names() + campus_config.school_fragments()))
+    campus_filter = _campus_filter_from_query(query)
     scored = []
     for college in _COLLEGE_LOCATIONS:
+        if campus_filter and college.get('campus') != campus_filter:
+            continue
         names = [college.get('name', '')] + college.get('aliases', [])
         buildings = college.get('buildings', [])
         building_names = []
@@ -907,7 +930,8 @@ _QUERY_STOP_TOKENS = {
     '学校', '校园', '华东', '师范', '大学', '校区', '哪里', '在哪', '位置',
     '地点', '附近', '周边', '周围', '旁边', '有哪些', '有什么', '推荐',
     '适合', '一下', '一个', '两个', '地图', '显示', '植物', '地方'
-}
+} | {word.casefold() for word in (
+    campus_config.school_names() + campus_config.school_fragments())}
 
 _SEMANTIC_STOP_TOKENS = _QUERY_STOP_TOKENS | {
     '我想', '想找', '找个', '可以', '请问', '目前', '现在', '一下',
@@ -967,17 +991,11 @@ def _display_plant_name_for_query(plant_name: str, query: str) -> str:
 
 
 def _campus_filter_from_query(query: str):
-    if re.search(r'闵行|紫竹', query or ''):
-        return '闵行'
-    if re.search(r'普陀|中北|中山北路', query or ''):
-        return '普陀'
-    return None
+    return campus_config.campus_from_text(query)
 
 
 def _normalize_campus(value):
-    if value in ('普陀', '闵行'):
-        return value
-    return None
+    return campus_config.normalize(value)
 
 
 def _preferred_campus_from_request(data: dict):
@@ -1428,7 +1446,8 @@ _LANDMARK_ANCHORS = {
 def _landmark_anchor_point(label: str, campus: str):
     """场景推荐使用地标中心作锚点，避免植物点落在地标边缘导致误解。"""
     label_base = re.sub(r'(周边|附近|沿线|密集点)$', '', label or '').strip()
-    return _LANDMARK_ANCHORS.get((campus, label_base))
+    return (campus_config.landmark_anchor(campus, label_base)
+            or _LANDMARK_ANCHORS.get((campus, label_base)))
 
 
 def _representative_anchor_point(items: list, label: str, label_key: str):
@@ -2161,10 +2180,10 @@ def _cluster_pattern_count(pois: list, pattern: str) -> int:
 def _cluster_waterfront_label(pois: list) -> str:
     """Return the real campus river name instead of a campus-agnostic label."""
     campuses = {poi.get('campus') for poi in pois if poi.get('campus')}
-    if campuses == {'闵行'}:
-        return '樱桃河'
-    if campuses == {'普陀'}:
-        return '丽娃河'
+    if len(campuses) == 1:
+        water_name = campus_config.water_name(next(iter(campuses)))
+        if water_name:
+            return water_name
     return '滨水区域'
 
 
@@ -2189,8 +2208,11 @@ def _scene_cluster_fit(pois: list, profile: dict) -> float:
     if '散步休闲' in scene_names:
         score += min(65, road * 1.5 + grass * 1.2 + sports * 4 + gym * 4 + office * 0.8 + library * 0.3 - water * 0.8)
     if '情侣约会' in scene_names:
-        liwa = _cluster_pattern_count(pois, r'丽娃河')
-        score += min(85, library * 2.2 + water * 0.8 + grass * 1.5 + liwa * 1.4 - sports * 3 - gym * 3)
+        water_name_pattern = campus_config.water_pattern()
+        named_water = (_cluster_pattern_count(pois, water_name_pattern)
+                       if water_name_pattern else 0)
+        score += min(85, library * 2.2 + water * 0.8 + grass * 1.5
+                     + named_water * 1.4 - sports * 3 - gym * 3)
         if library and water:
             score += 20
     if '拍照打卡' in scene_names:
@@ -2208,16 +2230,21 @@ def _scene_cluster_label(pois: list, profile: dict):
         return None
 
     waterfront_label = _cluster_waterfront_label(pois)
+    water_name_pattern = campus_config.water_pattern()
+    waterfront_pattern = '|'.join(filter(None, (
+        water_name_pattern, r'河畔|河边|桥',
+    )))
     rules = []
     if '情侣约会' in scene_names:
-        liwa = _cluster_pattern_count(pois, r'丽娃河')
+        named_water = (_cluster_pattern_count(pois, water_name_pattern)
+                       if water_name_pattern else 0)
         library = _cluster_pattern_count(pois, r'图书馆')
-        if liwa >= 20:
+        if named_water >= 20:
             return f'{waterfront_label}周边'
         if library >= 3:
             return '图书馆周边'
         rules.extend([
-            (waterfront_label, r'丽娃河|樱桃河|河畔|河边|桥', 4),
+            (waterfront_label, waterfront_pattern, 4),
             ('图书馆', r'图书馆', 3),
             ('草坪', r'草坪|绿地', 2),
         ])
@@ -2231,7 +2258,7 @@ def _scene_cluster_label(pois: list, profile: dict):
     if '拍照打卡' in scene_names:
         rules.extend([
             ('图书馆', r'图书馆', 4),
-            (waterfront_label, r'丽娃河|樱桃河|河畔|河边|桥', 1.8),
+            (waterfront_label, waterfront_pattern, 1.8),
             ('草坪', r'草坪|绿地', 1.5),
             ('花坛', r'花坛|花园', 1.5),
         ])
@@ -2239,7 +2266,7 @@ def _scene_cluster_label(pois: list, profile: dict):
         rules.extend([
             ('花坛', r'花坛|花园|花', 3),
             ('草坪', r'草坪|绿地', 1.5),
-            (waterfront_label, r'丽娃河|樱桃河|河畔|河边|桥', 1),
+            (waterfront_label, waterfront_pattern, 1),
         ])
 
     scored = []
@@ -3231,7 +3258,7 @@ _ITINERARY_PERIOD_QUERIES = (
 )
 
 _ITINERARY_SYSTEM_PROMPT = (
-    '你是华东师范大学校园导览助手。用户第一次来校，需要一份一日行程。'
+    '你是{school_name}校园导览助手。用户第一次来校，需要一份一日行程。'
     '下面给出的站点顺序、名称与推荐理由已由系统确定，你只能据此撰写自然语言行程说明，'
     '不得新增、替换或删除地点，也不得编造营业时间、票价或未提供的任何信息。'
     '下面没有给出的距离、耗时等数字一律不要写，也不要估算，只说"步行可达""建议骑行"这类说法。'
@@ -3239,7 +3266,7 @@ _ITINERARY_SYSTEM_PROMPT = (
 )
 
 
-def _itinerary_summary(context: str):
+def _itinerary_summary(context: str, campus=None):
     """用当前生效的大模型生成行程文案；失败返回 None，由调用方走确定性兜底文案。"""
     llm = resolve_llm()
     if not llm or not context:
@@ -3251,7 +3278,9 @@ def _itinerary_summary(context: str):
             json={
                 'model': llm['model'],
                 'messages': [
-                    {'role': 'system', 'content': _ITINERARY_SYSTEM_PROMPT},
+                    {'role': 'system', 'content': _ITINERARY_SYSTEM_PROMPT.format(
+                        school_name=(campus_config.school_of(
+                            campus or campus_config.default_campus()).get('name') or '校园'))},
                     {'role': 'user', 'content': context},
                 ],
                 'temperature': 0.4,
@@ -3319,7 +3348,7 @@ def _build_itinerary_reply(campus, origin_location):
         return None
 
     context = build_itinerary_context(campus, plan)
-    summary = _itinerary_summary(context)
+    summary = _itinerary_summary(context, campus)
     return build_chat_reply(
         campus, plan, summary or render_fallback_text(campus, plan), fallback=summary is None)
 
@@ -3900,7 +3929,8 @@ def chat():
         heat_scenes = [s for s in _matched_scene_profiles(user_query)
                        if s.get('id') in SCENE_IDS]
         if heat_scenes and not _direct_target_plant_names(user_query, plants, True):
-            heat_campus = _campus_filter_from_query(user_query) or preferred_campus or '普陀'
+            heat_campus = (_campus_filter_from_query(user_query)
+                           or preferred_campus or campus_config.default_campus())
             try:
                 heat_payload = _HEATMAP_STORE.get(heat_campus, heat_scenes[0]['id'])
                 if heat_payload['places']:
@@ -3948,7 +3978,13 @@ def chat():
     emotions = [] if unsupported_data_query or direct_pois else search_emotions(user_query)
     emotion_context = build_emotion_context(emotions)
 
-    system_content = """你是华东师范大学（ECNU）的校园植物向导，像一个熟悉校园每棵树的老朋友，回答时自然亲切、有温度，适当使用 emoji 增加趣味感。
+    answer_campus = (_campus_filter_from_query(user_query)
+                     or preferred_campus or campus_config.default_campus())
+    answer_school = campus_config.school_of(answer_campus)
+    school_name = answer_school.get('name') or '校园'
+    school_en_name = answer_school.get('enName') or ''
+    school_label = f'{school_name}（{school_en_name}）' if school_en_name else school_name
+    system_content = f"""你是{school_label}的校园植物与导览助手，像一个熟悉校园的老朋友，回答时自然亲切、有温度，适当使用 emoji 增加趣味感。
 
 【回答规则】
 1. 【禁止编造位置】只能使用下方数据中明确出现的位置，绝对不能补充、推测或编造任何数据中没有的位置信息

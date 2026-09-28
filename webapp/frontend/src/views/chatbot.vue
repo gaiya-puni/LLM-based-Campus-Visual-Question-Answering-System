@@ -3,8 +3,12 @@
     <!-- 左侧地图 -->
     <div class="map-panel">
       <div class="campus-toggle">
-        <button :class="['campus-btn', { active: activeCampus === '普陀' }]" @click="switchCampus('普陀')">普陀校区</button>
-        <button :class="['campus-btn', { active: activeCampus === '闵行' }]" @click="switchCampus('闵行')">闵行校区</button>
+        <button
+          v-for="campus in CAMPUSES"
+          :key="campus.slug"
+          :class="['campus-btn', { active: activeCampus === campus.name }]"
+          @click="switchCampus(campus.name)"
+        >{{ campus.name }}校区</button>
       </div>
       <div id="chat-map"></div>
       <SceneHeatmapPanel :map="heatmapMap" :campus="activeCampus" :mode="recommendationMode"
@@ -47,7 +51,7 @@
           </div>
         </div>
 
-        <div v-for="(msg, index) in messages" :key="index" :class="['message-item', msg.type]">
+        <div v-for="msg in messages" :key="msg.id" :class="['message-item', msg.type]">
           <div :class="['avatar', msg.type === 'user' ? 'avatar-user' : 'avatar-bot']">
             <div v-if="msg.type === 'user'" class="user-avatar-icon"><User /></div>
             <img v-else src="@/assets/ecnu-logo.png" class="avatar-img" alt="ECNU" />
@@ -55,6 +59,22 @@
           <div :class="['message-bubble', msg.type === 'user' ? 'user-bubble' : 'bot-bubble']">
             <p v-if="msg.type === 'user'">{{ msg.content }}</p>
             <p v-else v-html="parseMarkdown(msg.content)"></p>
+            <div v-if="msg.type === 'bot' && msg.unsupported" class="place-report-prompt">
+              <div>
+                <strong>知道这个地点？</strong>
+                <span>欢迎补充名称和位置，审核后会进入校园数据。</span>
+              </div>
+              <button type="button" class="place-report-btn" @click="openPlaceReport(msg)">去补充</button>
+            </div>
+            <MessageFeedback
+              v-if="msg.type === 'bot' && msg.query"
+              :message-id="msg.id"
+              :query="msg.query"
+              :engine="msg.engine"
+              :campus="msg.campus"
+              :value="msg.rating"
+              @submitted="updateMessageRating(msg, $event)"
+            />
             <span class="message-time">{{ msg.time }}</span>
           </div>
         </div>
@@ -93,6 +113,12 @@
         </div>
       </div>
     </div>
+
+    <PlaceReportDialog
+      v-model="placeReportOpen"
+      :campus="placeReportContext.campus"
+      :query-snippet="placeReportContext.query"
+    />
   </div>
 </template>
 
@@ -102,9 +128,18 @@ import { marked } from "marked";
 import DOMPurify from 'dompurify';
 import SceneHeatmapPanel from '../components/SceneHeatmapPanel.vue';
 import ItineraryPanel from '../components/ItineraryPanel.vue';
+import MessageFeedback from '../components/MessageFeedback.vue';
+import PlaceReportDialog from '../components/PlaceReportDialog.vue';
 import type { HeatmapPayload } from '../components/sceneHeatmapTypes';
 import type { ItineraryPayload, ItineraryStop } from '../components/itineraryTypes';
+import type { FeedbackRating } from '../api/userdata';
 import { loadAMap } from '../amap';
+import {
+  CAMPUSES,
+  CAMPUS_CENTERS,
+  CAMPUS_LOCATION_RADIUS_M,
+  DEFAULT_CAMPUS,
+} from '../campusConfig';
 
 marked.setOptions({ breaks: true, gfm: true });
 const parseMarkdown = (text: string) => DOMPurify.sanitize(
@@ -112,7 +147,18 @@ const parseMarkdown = (text: string) => DOMPurify.sanitize(
   { USE_PROFILES: { html: true } }
 );
 
-interface Message { type: 'user' | 'bot'; content: string; time: string; }
+interface Message {
+  id: string;
+  type: 'user' | 'bot';
+  content: string;
+  time: string;
+  createdAt: string;
+  query?: string;
+  engine?: string;
+  campus?: string;
+  unsupported?: boolean;
+  rating?: FeedbackRating | null;
+}
 interface Location {
   name: string;
   lng: number;
@@ -149,12 +195,14 @@ const isLoading = ref(false);
 const messagesContainer = ref<HTMLElement | null>(null);
 const mapLocations = ref<Location[]>([]);
 const allLocations = ref<Location[]>([]);
-const activeCampus = ref('普陀');
+const activeCampus = ref<string>(DEFAULT_CAMPUS);
 const userLocation = ref<UserLocation | null>(null);
 const recommendationMode = ref('sakde');
 const heatmapMap = shallowRef<any>(null);
 const heatmapResponse = shallowRef<HeatmapPayload | null>(null);
 const itineraryResponse = shallowRef<ItineraryPayload | null>(null);
+const placeReportOpen = ref(false);
+const placeReportContext = ref({ query: '', campus: '' });
 // 行程面板必须与地图保持一致：切到别的校区时该行程的标记已被过滤掉，面板也不应再显示。
 // 只做显示层过滤、不清数据，切回原校区即自动恢复。
 const visibleItinerary = computed(() =>
@@ -183,14 +231,6 @@ const panelItinerary = computed(() => {
 const heatmapActive = ref(false);
 const heatmapReset = ref(0);
 
-const CAMPUS_CENTERS: Record<string, [number, number]> = {
-  '普陀': [121.406079, 31.227073],
-  '闵行': [121.453725, 31.03148],
-};
-const CAMPUS_LOCATION_RADIUS_M: Record<string, number> = {
-  '普陀': 1300,
-  '闵行': 2200,
-};
 const MAX_GEO_ACCURACY_M = 800;
 
 let map: any = null;
@@ -202,6 +242,18 @@ let geolocation: any = null;
 // 行程路线使用独立实例数组，与单点导航（walking）互不干扰地清理与绘制。
 let itineraryWalkings: any[] = [];
 let itineraryRouteToken = 0;
+let campusPinned = false;
+
+const isKnownCampus = (value: unknown): value is string => (
+  typeof value === 'string'
+  && Object.prototype.hasOwnProperty.call(CAMPUS_CENTERS, value)
+);
+const resolveCampus = (value: unknown): string => (
+  isKnownCampus(value) ? value : DEFAULT_CAMPUS
+);
+const centerForCampus = (value: unknown): [number, number] => (
+  CAMPUS_CENTERS[resolveCampus(value)]
+);
 
 const resetItineraryRouteState = () => {
   itineraryRouteToken++;
@@ -215,7 +267,7 @@ const mapError = ref('');
 const initMap = () => {
   map = new (window as any).AMap.Map('chat-map', {
     zoom: 16,
-    center: CAMPUS_CENTERS[activeCampus.value],
+    center: centerForCampus(activeCampus.value),
   });
   heatmapMap.value = map;
 };
@@ -237,11 +289,12 @@ const nearestCampusByLocation = (lng: number, lat: number) => {
 };
 
 const campusCenterLocation = (campus = activeCampus.value): UserLocation => {
-  const center = CAMPUS_CENTERS[campus] || CAMPUS_CENTERS['普陀'];
+  const resolvedCampus = resolveCampus(campus);
+  const center = centerForCampus(resolvedCampus);
   return {
     lng: center[0],
     lat: center[1],
-    campus,
+    campus: resolvedCampus,
     trusted: false,
     campusTrusted: false,
     useForDistance: false,
@@ -319,9 +372,10 @@ const detectUserCampus = async () => {
   const assessed = await getAmapCurrentLocation();
   if (assessed?.trusted) {
     userLocation.value = assessed;
-    if (assessed.campusTrusted) {
-      activeCampus.value = assessed.campus;
-      map?.setCenter(CAMPUS_CENTERS[assessed.campus]);
+    if (assessed.campusTrusted && !campusPinned) {
+      activeCampus.value = resolveCampus(assessed.campus);
+      map?.setCenter(centerForCampus(activeCampus.value));
+      filterAndShow();
     }
   } else {
     userLocation.value = campusCenterLocation(activeCampus.value);
@@ -495,21 +549,23 @@ const setRecommendationMode = (mode: string) => {
 };
 
 const switchToFirstAvailableCampus = () => {
-  const firstCampus = allLocations.value.find(loc => loc.campus)?.campus;
+  const firstCampus = allLocations.value.find(loc => isKnownCampus(loc.campus))?.campus;
   if (!firstCampus || firstCampus === activeCampus.value) return;
   activeCampus.value = firstCampus;
-  map?.setCenter(CAMPUS_CENTERS[firstCampus]);
+  map?.setCenter(centerForCampus(firstCampus));
   map?.setZoom(16);
   filterAndShow();
 };
 
 // 手动切换校区：移动地图中心 + 重新过滤标记
 const switchCampus = (campus: string) => {
-  activeCampus.value = campus;
+  const resolvedCampus = resolveCampus(campus);
+  campusPinned = true;
+  activeCampus.value = resolvedCampus;
   if (!userLocation.value?.trusted || userLocation.value.source !== 'amap') {
-    userLocation.value = campusCenterLocation(campus);
+    userLocation.value = campusCenterLocation(resolvedCampus);
   }
-  map?.setCenter(CAMPUS_CENTERS[campus]);
+  map?.setCenter(centerForCampus(resolvedCampus));
   map?.setZoom(16);
   filterAndShow();
 };
@@ -587,16 +643,63 @@ onUnmounted(() => {
 });
 
 const CHAT_API_URL = '/api/chat';
-const getCurrentTime = () => {
-  const now = new Date();
+const getCurrentTime = (now = new Date()) => {
   return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
 };
 
+const createMessageId = () => {
+  const cryptoApi = globalThis.crypto;
+  if (typeof cryptoApi?.randomUUID === 'function') return cryptoApi.randomUUID();
+  return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+};
+
+const createMessage = (
+  type: Message['type'],
+  content: string,
+  metadata: Partial<Omit<Message, 'id' | 'type' | 'content' | 'time' | 'createdAt'>> = {},
+): Message => {
+  const createdAt = new Date();
+  return {
+    id: createMessageId(),
+    type,
+    content,
+    time: getCurrentTime(createdAt),
+    createdAt: createdAt.toISOString(),
+    ...metadata,
+  };
+};
+
+const responseEngine = (data: any): string => {
+  if (typeof data?.recommendation_engine === 'string' && data.recommendation_engine.trim()) {
+    return data.recommendation_engine.trim();
+  }
+  if (data?.unsupported) return 'unsupported';
+  if (data?.itinerary) return 'itinerary';
+  if (data?.heatmap) return 'sakde';
+  return 'llm';
+};
+
+const updateMessageRating = (
+  message: Message,
+  payload: { rating: FeedbackRating; reason: string },
+) => {
+  message.rating = payload.rating === 'none' ? null : payload.rating;
+};
+
+const openPlaceReport = (message: Message) => {
+  placeReportContext.value = {
+    query: message.query || '',
+    campus: message.campus || activeCampus.value,
+  };
+  placeReportOpen.value = true;
+};
+
 const sendMessage = async (content: string) => {
-  if (!content.trim() || isLoading.value) return;
+  const query = content.trim();
+  if (!query || isLoading.value) return;
   heatmapResponse.value = null;
   heatmapReset.value++;
-  messages.value.push({ type: 'user', content: content.trim(), time: getCurrentTime() });
+  messages.value.push(createMessage('user', query));
   inputMessage.value = '';
   isLoading.value = true;
   await nextTick();
@@ -624,25 +727,41 @@ const sendMessage = async (content: string) => {
     });
     if (!response.ok) throw new Error(`API请求失败: ${response.status}`);
     const data = await response.json();
-    messages.value.push({ type: 'bot', content: data.choices?.[0]?.message?.content || '抱歉，我暂时无法回答这个问题。', time: getCurrentTime() });
+    const botMessage = createMessage(
+      'bot',
+      data.choices?.[0]?.message?.content || '抱歉，我暂时无法回答这个问题。',
+      {
+        query,
+        engine: responseEngine(data),
+        campus: resolveCampus(
+          data.itinerary?.campus || data.locations?.[0]?.campus || activeCampus.value,
+        ),
+        unsupported: data.unsupported === true,
+        rating: null,
+      },
+    );
+    messages.value.push(botMessage);
     // 行程数据需先于地图渲染更新：绘制行程路线时会读 legs 判断哪些腿是骑行。
     resetItineraryRouteState();
     itineraryResponse.value = data.itinerary || null;
     if (data.locations?.length) {
       allLocations.value = pickMapLocations(data.locations);
-      const campuses = Array.from(new Set(allLocations.value.map(loc => loc.campus).filter(Boolean)));
+      const campuses = Array.from(new Set(
+        allLocations.value.map(loc => loc.campus).filter(isKnownCampus),
+      ));
       if (campuses.length === 1 && campuses[0] !== activeCampus.value) {
         activeCampus.value = campuses[0];
-        map?.setCenter(CAMPUS_CENTERS[activeCampus.value]);
+        map?.setCenter(centerForCampus(activeCampus.value));
         map?.setZoom(16);
       }
       filterAndShow();
       // 当前校区无此地点，但其他校区有 → 追加提示
       if (mapLocations.value.length === 0) {
         switchToFirstAvailableCampus();
-        const last = messages.value[messages.value.length - 1];
-        if (last?.type === 'bot' && mapLocations.value.length)
-          last.content += `\n\n> ⚠️ 您所在校区暂无该地点，已为您显示 **${activeCampus.value}校区** 的相关位置 🗺️`;
+        if (mapLocations.value.length) {
+          botMessage.campus = activeCampus.value;
+          botMessage.content += `\n\n> ⚠️ 您所在校区暂无该地点，已为您显示 **${activeCampus.value}校区** 的相关位置 🗺️`;
+        }
       }
     } else {
       allLocations.value = [];
@@ -653,19 +772,16 @@ const sendMessage = async (content: string) => {
     await nextTick();
     heatmapResponse.value = data.heatmap || null;
     if (data.heatmap_status) {
-      const last = messages.value[messages.value.length - 1];
-      if (last?.type === 'bot') last.content += `\n\n> 热图提示：${data.heatmap_status}。本次使用原版推荐。`;
+      botMessage.content += `\n\n> 热图提示：${data.heatmap_status}。本次使用原版推荐。`;
     }
     if (data.itinerary_status) {
-      const last = messages.value[messages.value.length - 1];
-      if (last?.type === 'bot') last.content += `\n\n> 行程提示：${data.itinerary_status}。`;
+      botMessage.content += `\n\n> 行程提示：${data.itinerary_status}。`;
     }
   } catch {
-    messages.value.push({
-      type: 'bot',
-      content: '当前是本地演示模式，未连接后端智能问答服务。您仍可浏览植物图鉴、地图页面和静态可视化成果；如需体验完整问答，请按源码包说明启动 Flask 后端。',
-      time: getCurrentTime()
-    });
+    messages.value.push(createMessage(
+      'bot',
+      '当前是本地演示模式，未连接后端智能问答服务。您仍可浏览植物图鉴、地图页面和静态可视化成果；如需体验完整问答，请按源码包说明启动 Flask 后端。',
+    ));
   } finally {
     isLoading.value = false;
     await nextTick();
@@ -881,6 +997,7 @@ const scrollToBottom = () => {
     border-radius: 16px;
     padding: 12px 16px;
     max-width: 80%;
+    min-width: 0;
     box-shadow: 0 2px 8px rgba(0,0,0,0.08);
     font-size: 14px;
 
@@ -893,9 +1010,70 @@ const scrollToBottom = () => {
       text-align: right;
       color: #999;
     }
+
+    .place-report-prompt {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 10px;
+      padding: 10px;
+      border: 1px solid #f3c6cb;
+      border-radius: 10px;
+      background: #fff7f8;
+
+      div {
+        display: flex;
+        min-width: 0;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      strong {
+        color: #a50918;
+        font-size: 13px;
+      }
+
+      span {
+        color: #7a6164;
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .place-report-btn {
+        min-height: 32px;
+        flex-shrink: 0;
+        padding: 6px 12px;
+        border: 1px solid #c20a1c;
+        border-radius: 999px;
+        background: #c20a1c;
+        color: #fff;
+        font-size: 12px;
+        cursor: pointer;
+        transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+
+        &:hover {
+          border-color: #a50918;
+          background: #a50918;
+          transform: translateY(-1px);
+        }
+
+        &:focus-visible {
+          outline: 2px solid rgba(194, 10, 28, 0.35);
+          outline-offset: 2px;
+        }
+      }
+    }
   }
 
   .bot-bubble { background: white; color: #333; }
+}
+
+@media (max-width: 520px) {
+  .message-item .message-bubble .place-report-prompt {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 
 .loading-message {

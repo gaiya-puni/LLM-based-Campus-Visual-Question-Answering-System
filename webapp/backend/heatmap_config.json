@@ -38,6 +38,14 @@
         31.03148
       ],
       "auditRadiusMeters": 2300
+    },
+    "交大闵行": {
+      "slug": "sjtu_minhang",
+      "center": [
+        121.436882,
+        31.025626
+      ],
+      "auditRadiusMeters": 1800
     }
   },
   "scenes": {

@@ -7,6 +7,7 @@
 """
 import os
 import unittest
+from unittest.mock import patch
 
 # 测试隔离：不把用例问句写进真实的用户共建数据目录（见 USER_DATA_PIPELINE.md）
 os.environ.setdefault('USERDATA_CAPTURE', '0')
@@ -74,16 +75,96 @@ class RankingLocationSanitizingTests(unittest.TestCase):
 
     def test_chat_survives_nan_user_location(self):
         client = server.app.test_client()
-        for query, extra in (('普陀校区哪里适合看花', {}),
-                             ('我第一次来普陀校区，帮我规划一天', {'recommendationMode': 'sakde'})):
-            response = client.post('/api/chat', json={
-                'messages': [{'role': 'user', 'content': query}],
-                'userCampus': '普陀',
-                'userLocation': {'lng': float('nan'), 'lat': 31.2, 'source': 'amap',
-                                 'trusted': True, 'useForDistance': True, 'campus': '普陀'},
-                **extra,
+        fake = type('Response', (), {
+            'raise_for_status': lambda self: None,
+            'json': lambda self: {'choices': [{'message': {'content': '离线测试回答'}}]},
+        })()
+        # This regression is about coordinate sanitizing, so it must not depend
+        # on a configured provider or live network access.
+        with patch.object(server.requests, 'post', return_value=fake):
+            for query, extra in (('普陀校区哪里适合看花', {}),
+                                 ('我第一次来普陀校区，帮我规划一天', {'recommendationMode': 'sakde'})):
+                response = client.post('/api/chat', json={
+                    'messages': [{'role': 'user', 'content': query}],
+                    'userCampus': '普陀',
+                    'userLocation': {'lng': float('nan'), 'lat': 31.2, 'source': 'amap',
+                                     'trusted': True, 'useForDistance': True, 'campus': '普陀'},
+                    **extra,
+                })
+                self.assertEqual(response.status_code, 200, query)
+
+
+class ConfigDrivenCampusTests(unittest.TestCase):
+    def test_server_helpers_accept_every_configured_campus(self):
+        for campus in campus_config.campus_names():
+            with self.subTest(campus=campus):
+                self.assertEqual(server._normalize_campus(campus), campus)
+                self.assertEqual(server._campus(*campus_config.center(campus)), campus)
+
+    def test_query_scope_disambiguates_same_district_name(self):
+        self.assertEqual(
+            server._campus_filter_from_query('华东师范大学闵行校区怎么走'),
+            '闵行',
+        )
+        self.assertEqual(
+            server._campus_filter_from_query('上海交通大学闵行校区怎么走'),
+            '交大闵行',
+        )
+
+    def test_explicit_ui_selection_accepts_sjtu_minhang(self):
+        preferred = server._preferred_campus_from_request({
+            'userCampus': '交大闵行',
+            'userLocation': {
+                'lng': 121.406079,
+                'lat': 31.227073,
+                'source': 'amap',
+                'trusted': True,
+                'useForDistance': True,
+                'campus': '普陀',
+            },
+        })
+        self.assertEqual(preferred, '交大闵行')
+
+    def test_waterfront_label_uses_configured_water_name(self):
+        self.assertEqual(
+            server._cluster_waterfront_label([{'campus': '交大闵行'}]),
+            '思源湖',
+        )
+
+    def test_sjtu_place_query_cannot_leak_ecnu_colleges(self):
+        query = '上海交通大学闵行校区包玉刚图书馆在哪里'
+        self.assertEqual(server.search_colleges(query), [])
+        matches = server.direct_configured_poi_matches(query)
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]['campus'], '交大闵行')
+        self.assertEqual(matches[0]['category'], 'scene')
+        self.assertIn('包玉刚图书馆', matches[0]['name'])
+        self.assertEqual(server.direct_configured_poi_matches('图书馆在哪里'), [])
+
+    def test_sjtu_place_chat_returns_only_sjtu_location_and_prompt(self):
+        fake = type('Response', (), {
+            'raise_for_status': lambda self: None,
+            'json': lambda self: {
+                'choices': [{'message': {'role': 'assistant', 'content': '测试回答'}}],
+            },
+        })()
+        llm = {'api_url': 'https://example.invalid', 'api_key': 'test', 'model': 'test'}
+        with patch.object(server, 'resolve_llm', return_value=llm), patch.object(
+                server.requests, 'post', return_value=fake) as post:
+            response = server.app.test_client().post('/api/chat', json={
+                'messages': [{
+                    'role': 'user',
+                    'content': '上海交通大学闵行校区包玉刚图书馆在哪里',
+                }],
+                'userCampus': '交大闵行',
             })
-            self.assertEqual(response.status_code, 200, query)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json['locations']), 1)
+        self.assertEqual(response.json['locations'][0]['campus'], '交大闵行')
+        self.assertIn('包玉刚图书馆', response.json['locations'][0]['name'])
+        system_prompt = post.call_args.kwargs['json']['messages'][0]['content']
+        self.assertIn('上海交通大学（SJTU）', system_prompt)
+        self.assertNotIn('华东师范大学（ECNU）', system_prompt)
 
 
 class NeedleAnswerTests(unittest.TestCase):

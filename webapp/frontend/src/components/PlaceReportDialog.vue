@@ -1,9 +1,10 @@
 <template>
   <el-dialog
     v-model="visible"
-    width="720px"
+    width="min(720px, calc(100vw - 24px))"
     top="8vh"
     class="place-report-dialog"
+    aria-label="补充一个校园地点"
     :close-on-click-modal="false"
     @opened="initPicker"
   >
@@ -170,7 +171,16 @@ const setPoint = (lng: number, lat: number) => {
   errorTip.value = '';
   const AMap = (window as any).AMap;
   if (!pickerMarker && pickerMap && AMap) {
-    pickerMarker = new AMap.Marker({ position: [lng, lat], map: pickerMap });
+    pickerMarker = new AMap.Marker({
+      position: [lng, lat],
+      map: pickerMap,
+      draggable: true,
+      cursor: 'move',
+    });
+    pickerMarker.on('dragend', (event: any) => {
+      const position = event.target.getPosition();
+      setPoint(position.getLng(), position.getLat());
+    });
   } else if (pickerMarker) {
     pickerMarker.setPosition([lng, lat]);
   }
@@ -390,5 +400,9 @@ onUnmounted(() => {
   .dialog-body { flex-direction: column; }
   .form-column { flex: none; }
   .map-column .picker-map { height: 300px; }
+}
+
+@media (max-width: 600px) {
+  .map-column .picker-map { height: 240px; }
 }
 </style>

@@ -146,6 +146,58 @@ def normalize(value):
     return None
 
 
+def campus_from_text(value):
+    """从自然语言中识别校区，优先用学校名消解同名校区。
+
+    例如“上海交通大学闵行校区”同时含有通用片段“闵行校区”，不能因此误判为
+    华师大闵行校区。若问句明确提到一所学校，则只在该校名下匹配；该校当前仅
+    登记一个校区且问句没有另一个未知“××校区”时，可安全回退到这个校区。
+    """
+    text = str(value or '').strip()
+    if not text:
+        return None
+    folded = text.casefold()
+
+    matched_school_ids = []
+    for school_id, info in schools().items():
+        terms = [info.get('name'), info.get('enName')] + list(info.get('aliases') or [])
+        if any(str(term).casefold() in folded for term in terms if term):
+            matched_school_ids.append(school_id)
+
+    scoped_school = matched_school_ids[0] if len(matched_school_ids) == 1 else None
+    candidates = [
+        item for item in campuses()
+        if not scoped_school or item.get('school') == scoped_school
+    ]
+    matches = []
+    for order, item in enumerate(candidates):
+        terms = [item['name']] + list(item.get('aliases') or [])
+        if scoped_school:
+            info = schools().get(scoped_school) or {}
+            school_terms = [info.get('name'), info.get('enName')] + list(info.get('aliases') or [])
+            # “交大闵行”在已确定为交大后，也允许用不含学校前缀的“闵行”匹配。
+            for term in list(terms):
+                term_text = str(term)
+                for prefix in school_terms:
+                    prefix_text = str(prefix or '')
+                    if prefix_text and term_text.casefold().startswith(prefix_text.casefold()):
+                        suffix = term_text[len(prefix_text):]
+                        if suffix:
+                            terms.append(suffix)
+        matched_lengths = [
+            len(str(term)) for term in terms
+            if term and str(term).casefold() in folded
+        ]
+        if matched_lengths:
+            matches.append((max(matched_lengths), -order, item['name']))
+    if matches:
+        return max(matches)[2]
+
+    if scoped_school and len(candidates) == 1 and '校区' not in text:
+        return candidates[0]['name']
+    return None
+
+
 def center(campus):
     entry = _entry(campus)
     return tuple(entry['center']) if entry else None
@@ -290,6 +342,13 @@ def check_consistency() -> list:
         heat_campuses = (json.load(handle).get('campuses') or {})
     known = campus_names()
     known_schools = schools()
+    if default_campus() not in known:
+        problems.append(f'defaultCampus "{default_campus()}" 未在 campuses 中登记')
+    if len(known) != len(set(known)):
+        problems.append('campuses 中的 name 必须全局唯一')
+    slugs = [item.get('slug') for item in campuses()]
+    if len(slugs) != len(set(slugs)):
+        problems.append('campuses 中的 slug 必须全局唯一')
     if 'schools' in config():
         # 多校配置：每个校区必须声明 school，且该 id 必须在 schools 表里登记
         for item in campuses():
@@ -311,6 +370,12 @@ def check_consistency() -> list:
         if other.get('slug') != item.get('slug'):
             problems.append(
                 f'{name}: slug 不一致 {other.get("slug")} != {item.get("slug")}')
+        audit_radius_m = other.get('auditRadiusMeters')
+        if (isinstance(audit_radius_m, bool)
+                or not isinstance(audit_radius_m, (int, float))
+                or not math.isfinite(audit_radius_m)
+                or audit_radius_m <= 0):
+            problems.append(f'{name}: auditRadiusMeters 必须是正数')
     for name in heat_campuses:
         if name not in known:
             problems.append(f'{name}: 出现在 heatmap_config.json 但未登记到 campuses.json')

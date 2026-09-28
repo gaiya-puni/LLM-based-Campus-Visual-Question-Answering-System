@@ -1,4 +1,4 @@
-"""Build four scenes x two campuses. Downloads are opt-in; existing index untouched.
+"""Build configured campus/scene heatmaps. Downloads are opt-in; existing index untouched.
 
 散步(walk)/约会(date) 使用两个可解释、且只依赖本场景输入的信号：
   1. 地名先验：prepare_geometry(scene=...) 按 locationName 生成逐点权重；
@@ -14,26 +14,31 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from scene_heatmaps import (ALGORITHM_VERSION, SEASON_ORDER, audit_pois, build_map,
-                           build_plant_priors, class_documents, fingerprint, load_config,
-                           prepare_geometry)
+from scene_heatmaps import (ALGORITHM_VERSION, SEASON_ORDER, InsufficientSpatialCoverage,
+                           audit_pois, build_map, build_plant_priors, class_documents,
+                           fingerprint, load_config, poi_source_paths, prepare_geometry)
 from semantic_retrieval import DEFAULT_MODEL_NAME, build_scene_document, encode_documents
 
 BASE = Path(__file__).resolve().parent
+
+
 def write_json(path: Path, data):
     temporary = path.with_suffix(".tmp")
     temporary.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     temporary.replace(path)
 
 
-def load_pois() -> list[dict]:
-    """植物 POI + 可选的 scene_pois.json（座椅/共青场等非植物场景 POI）。"""
-    pois = json.loads((BASE / "campus_pois.json").read_text(encoding="utf-8"))
-    scene_pois_path = BASE / "scene_pois.json"
-    if scene_pois_path.exists():
-        extra = json.loads(scene_pois_path.read_text(encoding="utf-8"))
-        if isinstance(extra, list):
-            pois = pois + extra
+def load_pois(base: Path = BASE) -> list[dict]:
+    """Load every deterministic ``*_pois.json`` source used by the fingerprint."""
+    pois = []
+    paths = poi_source_paths(base)
+    if not paths:
+        raise FileNotFoundError(f"no *_pois.json files found in {base}")
+    for path in paths:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, list):
+            raise ValueError(f"{path.name} must contain a JSON list")
+        pois.extend(data)
     return pois
 
 
@@ -80,10 +85,11 @@ def scene_document(profiles: dict, config: dict, scene: str) -> str:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--allow-download", action="store_true", help="allow first-time BGE download")
+    parser.add_argument("--output-dir", type=Path, help="write cache files here instead of heatmap_cache")
     args = parser.parse_args()
     started = time.perf_counter()
     config = load_config(BASE)
-    raw = load_pois()
+    raw = load_pois(BASE)
     pois, audit = audit_pois(raw, config)
     templates = json.loads((BASE / "../../data/all_templates.json").read_text(encoding="utf-8"))
     profiles = {p["id"]: p for p in json.loads((BASE / "scene_profiles.json").read_text(encoding="utf-8"))}
@@ -99,9 +105,10 @@ def main():
     class_vectors = encode_documents(model, list(documents.values()))
     matrix = scene_vectors @ class_vectors.T
     similarities = {s: dict(zip(names, map(float, matrix[i]))) for i, s in enumerate(scenes)}
-    out = BASE / "heatmap_cache"
-    out.mkdir(exist_ok=True)
+    out = args.output_dir.resolve() if args.output_dir else BASE / "heatmap_cache"
+    out.mkdir(parents=True, exist_ok=True)
     timings = {}
+    skipped_heatmaps = {}
     total_maps = 0
     for campus, campus_config in config["campuses"].items():
         campus_start = time.perf_counter()
@@ -109,7 +116,14 @@ def main():
             # 每个场景按自己的点位集合与地名先验建几何。赏花不在地名先验场景内，
             # 其点位集合与逐点权重都与旧版本一致，输出不变。
             scene_pois = pois_for_scene(pois, scene)
-            geometry = prepare_geometry(scene_pois, campus, config, scene=scene)
+            try:
+                geometry = prepare_geometry(scene_pois, campus, config, scene=scene)
+            except InsufficientSpatialCoverage:
+                reason = (f"{campus}的{config['scenes'][scene]}有效点位不足，"
+                          "无法生成热图（至少需要 3 个点）")
+                skipped_heatmaps.setdefault(campus, {})[scene] = reason
+                print(f"{campus} {scene}: skipped - {reason}", flush=True)
+                continue
             class_weights = scene_class_weight_map(scene_pois, scene)
             if scene in ("flower_viewing", "photo"):
                 # 按季节生成多套缓存，运行时按当前月份选取。
@@ -143,6 +157,7 @@ def main():
         "sceneCorpusOverrides": sorted((config.get("sceneCorpusOverrides") or {}).keys()),
         "facilityShare": config.get("facilityShare"),
         "scenePoiWeighting": "uniform",
+        "skippedHeatmaps": skipped_heatmaps,
         "placeLimit": config.get("placeLimit"),
         "sceneIndependence": "each_scene_uses_only_its_own_inputs",
         "secondsByCampus": timings, "totalSeconds": round(time.perf_counter()-started, 3),

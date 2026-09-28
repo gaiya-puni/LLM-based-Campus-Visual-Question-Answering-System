@@ -15,9 +15,9 @@ from pathlib import Path
 import numpy as np
 
 from build_scene_heatmaps import load_pois, pois_for_scene, write_json
-from scene_heatmaps import (HeatmapStore, audit_pois, build_plant_priors, fuse_fields,
-                           hotspot_places, kernel_field, load_config, normalize,
-                           prepare_geometry, to_meters)
+from scene_heatmaps import (HeatmapStore, HeatmapUnavailable, InsufficientSpatialCoverage,
+                           audit_pois, build_plant_priors, fuse_fields, hotspot_places,
+                           kernel_field, load_config, normalize, prepare_geometry, to_meters)
 
 BASE = Path(__file__).resolve().parent
 
@@ -69,7 +69,7 @@ def main():
     # 植物 + 场景专属 POI 一起参与审计，与构建脚本保持一致。
     pois, audit = audit_pois(load_pois(), config)
     similarities = json.loads((store.cache / 'class_similarities.json').read_text(encoding='utf-8'))
-    report = {'audit': audit, 'cases': [], 'sceneComparisons': [],
+    report = {'audit': audit, 'cases': [], 'skippedCases': [], 'sceneComparisons': [],
               'qualityNote': '无人工标注时，仅报告技术对照；不能据此宣称SAKDE推荐更准确。'}
     labels = json.loads(args.labels.read_text(encoding='utf-8')) if args.labels else []
     cell = config['cellMeters']
@@ -78,8 +78,19 @@ def main():
         views, fields = {}, {}
         for scene, display_name in config['scenes'].items():
             scene_pois = pois_for_scene(pois, scene)
-            geometry = prepare_geometry(scene_pois, campus, config, scene=scene)
-            fixed, fixed_contributions = _fixed_kde(geometry, len(scene_pois), config)
+            try:
+                geometry = prepare_geometry(scene_pois, campus, config, scene=scene)
+            except InsufficientSpatialCoverage as exc:
+                reason = str(exc)
+                try:
+                    store.get(campus, scene)
+                except HeatmapUnavailable as unavailable:
+                    reason = str(unavailable)
+                report['skippedCases'].append({
+                    'campus': campus, 'scene': scene, 'reason': reason,
+                })
+                continue
+            fixed, fixed_contributions = _fixed_kde(geometry, len(geometry['pois']), config)
             fixed_places = hotspot_places(geometry, fixed, fixed_contributions)
             started = time.perf_counter()
             data = store.get(campus, scene)
@@ -109,7 +120,7 @@ def main():
                                               preferred_campus=campus)
             rule_seconds = time.perf_counter() - started
             case = {'campus': campus, 'scene': scene, 'query': query,
-                    'scenePointCount': len(scene_pois), 'gridWidth': view['width'], 'gridHeight': view['height'],
+                    'scenePointCount': len(geometry['pois']), 'gridWidth': view['width'], 'gridHeight': view['height'],
                     'sakdeReadMs': round(elapsed * 1000, 2), 'ruleRankMs': round(rule_seconds * 1000, 2),
                     'gridCells': view['width'] * view['height'], 'supportedCells': int(geometry['mask'].sum()),
                     'sakdeVsFixedKdeMAE': round(float(np.abs(fields[scene] - fixed[geometry['mask']]).mean()), 5),
