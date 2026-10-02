@@ -415,9 +415,12 @@ def poi_source_paths(base: Path) -> list[Path]:
 
 
 def source_paths(base: Path) -> list[Path]:
+    template_path = base / "all_templates.json"
+    if not template_path.exists():
+        template_path = base / "../../data/all_templates.json"
     paths = [base / "heatmap_config.json", base / "scene_profiles.json",
              *poi_source_paths(base)]
-    paths.extend([base / "../../data/all_templates.json", base / "scene_heatmaps.py",
+    paths.extend([template_path, base / "scene_heatmaps.py",
                   base / "build_scene_heatmaps.py", base / "semantic_retrieval.py"])
     return paths
 

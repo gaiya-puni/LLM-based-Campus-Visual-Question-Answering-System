@@ -49,6 +49,12 @@
             </el-icon>
             <template #title>数据审核</template>
         </el-menu-item>
+        <el-menu-item index="/campus-build">
+            <el-icon>
+                <DataAnalysis />
+            </el-icon>
+            <template #title>热力图生成</template>
+        </el-menu-item>
     </el-menu>
 </template>
 

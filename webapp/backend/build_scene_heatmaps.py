@@ -85,27 +85,32 @@ def scene_document(profiles: dict, config: dict, scene: str) -> str:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--allow-download", action="store_true", help="allow first-time BGE download")
+    parser.add_argument("--base-dir", type=Path, help="isolated source workspace (defaults to backend)")
     parser.add_argument("--output-dir", type=Path, help="write cache files here instead of heatmap_cache")
     args = parser.parse_args()
+    base = args.base_dir.resolve() if args.base_dir else BASE
     started = time.perf_counter()
-    config = load_config(BASE)
-    raw = load_pois(BASE)
+    config = load_config(base)
+    raw = load_pois(base)
     pois, audit = audit_pois(raw, config)
-    templates = json.loads((BASE / "../../data/all_templates.json").read_text(encoding="utf-8"))
-    profiles = {p["id"]: p for p in json.loads((BASE / "scene_profiles.json").read_text(encoding="utf-8"))}
+    template_path = base / "all_templates.json"
+    if not template_path.exists():
+        template_path = base / "../../data/all_templates.json"
+    templates = json.loads(template_path.read_text(encoding="utf-8"))
+    profiles = {p["id"]: p for p in json.loads((base / "scene_profiles.json").read_text(encoding="utf-8"))}
     documents = class_documents(pois, templates)
     plant_priors = build_plant_priors(templates, pois)
     scenes = list(config["scenes"])
     names = list(documents)
     from sentence_transformers import SentenceTransformer
     model_name = os.getenv("SEMANTIC_MODEL_PATH", DEFAULT_MODEL_NAME).strip()
-    source_hash = fingerprint(BASE, model_name)
+    source_hash = fingerprint(base, model_name)
     model = SentenceTransformer(model_name, local_files_only=not args.allow_download)
     scene_vectors = encode_documents(model, [scene_document(profiles, config, s) for s in scenes])
     class_vectors = encode_documents(model, list(documents.values()))
     matrix = scene_vectors @ class_vectors.T
     similarities = {s: dict(zip(names, map(float, matrix[i]))) for i, s in enumerate(scenes)}
-    out = args.output_dir.resolve() if args.output_dir else BASE / "heatmap_cache"
+    out = args.output_dir.resolve() if args.output_dir else base / "heatmap_cache"
     out.mkdir(parents=True, exist_ok=True)
     timings = {}
     skipped_heatmaps = {}
@@ -144,7 +149,7 @@ def main():
                 print(f"{campus} {scene}: {geometry['width']}x{geometry['height']}; "
                       f"Top={[p['name'] for p in payload['places']]}", flush=True)
         timings[campus] = round(time.perf_counter() - campus_start, 3)
-    if fingerprint(BASE, model_name) != source_hash:
+    if fingerprint(base, model_name) != source_hash:
         raise RuntimeError("Source files changed during build; rerun the builder")
     write_json(out / "class_similarities.json", {"sourceHash": source_hash, "scores": similarities})
     # Commit manifest last; runtime rejects incomplete or outdated cache files.

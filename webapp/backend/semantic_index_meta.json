@@ -1,7 +1,7 @@
 {
   "model": "BAAI/bge-small-zh-v1.5",
-  "createdAt": "2026-09-28T14:24:50.433736+00:00",
-  "sourceHash": "34a1da2dddf8712e0d0780150fe7b0ef67ddc1a1465e058f06aa28ba22b5750b",
+  "createdAt": "2026-10-02T01:38:35.642077+00:00",
+  "sourceHash": "4a6df1a6e6b6d5550e909363014e21576b691cc44c186c8ed6eac24c892408b2",
   "sceneCount": 6,
   "poiCount": 3122,
   "sourceFiles": [

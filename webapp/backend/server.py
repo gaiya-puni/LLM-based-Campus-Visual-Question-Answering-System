@@ -15,6 +15,8 @@ import os
 import requests
 import re
 import threading
+import sys
+from pathlib import Path
 
 import campus_config
 import place_extraction
@@ -24,11 +26,29 @@ from scene_heatmaps import SCENE_IDS, HeatmapStore, HeatmapUnavailable, heatmap_
 from itinerary import (build_chat_reply, build_itinerary_context, is_itinerary_query,
                        plan_day, render_fallback_text)
 
+# ``server.py`` is commonly started from ``webapp/backend`` directly, while
+# the generator package lives at the repository root.
+_PROJECT_ROOT = str(Path(__file__).resolve().parents[2])
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
+from tools.campus_generator.harvest import (AmapPoiHarvester, HarvestCache,
+                                             JsonHarvester, PublicWebHarvester)
+from tools.campus_generator.jobs import BuildJobManager
+from tools.campus_generator.discovery import (CampusProfileResolver,
+                                                DiscoveryOrchestrator)
+from tools.campus_generator.review import apply_review, load_review
+from tools.campus_generator.publish import build_publish_plan, publish as _publish_campus_build
+
 _BASE = os.path.dirname(__file__)
 load_dotenv(os.path.join(_BASE, '../../.env'))
 load_dotenv(os.path.join(_BASE, '.env'))
 
+_CAMPUS_BUILD_ROOT = Path(_BASE) / 'userdata' / 'campus_builds'
+_CAMPUS_BUILD_MANAGER = None
+
 app = Flask(__name__)
+_CAMPUS_BUILD_MANAGER = BuildJobManager(_CAMPUS_BUILD_ROOT)
 app.config.update(
     SECRET_KEY=os.getenv('FLASK_SECRET_KEY') or os.urandom(32),
     MAX_CONTENT_LENGTH=int(os.getenv('MAX_CONTENT_LENGTH', str(1024 * 1024))),
@@ -47,6 +67,229 @@ if allowed_origins:
         resources={r'/api/*': {'origins': allowed_origins}},
         supports_credentials=True,
     )
+
+
+def _campus_build_profile_path(value):
+    """Accept only an existing JSON profile under the repository tree."""
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError('profile is required')
+    path = Path(value).resolve()
+    repo_root = Path(_BASE).resolve().parent.parent
+    try:
+        path.relative_to(repo_root)
+    except ValueError as exc:
+        raise ValueError('profile must be inside the project') from exc
+    if path.suffix.lower() != '.json' or not path.is_file():
+        raise ValueError('profile must be an existing JSON file')
+    return path
+
+
+def _campus_build_harvesters(payload, profile_path):
+    """Build allow-listed harvesters from request data without arbitrary paths."""
+    if not isinstance(payload, dict):
+        raise ValueError('harvest must be an object')
+    cache = HarvestCache(_CAMPUS_BUILD_ROOT / 'cache')
+    harvesters = []
+    candidates_path = payload.get('candidates')
+    if candidates_path:
+        harvesters.append(JsonHarvester(_campus_build_profile_path(candidates_path)))
+    keywords = payload.get('amapKeywords') or []
+    if keywords:
+        if not isinstance(keywords, list) or not all(isinstance(item, str) for item in keywords):
+            raise ValueError('amapKeywords must be a list of strings')
+        if not os.getenv('AMAP_WEB_SERVICE_KEY', '').strip():
+            raise ValueError('高德 POI 采集未配置 AMAP_WEB_SERVICE_KEY，请在项目根目录 .env 配置后重启后端')
+        profile = json.loads(profile_path.read_text(encoding='utf-8'))
+        harvesters.append(AmapPoiHarvester(profile, keywords, cache=cache))
+    urls = payload.get('webUrls') or []
+    if urls:
+        if not isinstance(urls, list) or not all(isinstance(item, str) for item in urls):
+            raise ValueError('webUrls must be a list of strings')
+        harvesters.append(PublicWebHarvester(urls, cache=cache))
+    if not harvesters:
+        raise ValueError('at least one harvest source is required')
+    return harvesters
+
+
+@app.route('/api/campus/build', methods=['POST'])
+def submit_campus_build():
+    """Queue a candidate build; output remains pending review in userdata."""
+    data = request.get_json(silent=True) or {}
+    try:
+        profile_path = _campus_build_profile_path(data.get('profile'))
+        harvesters = _campus_build_harvesters(data.get('harvest'), profile_path)
+        existing_config = data.get('baseConfig')
+        if existing_config:
+            existing_config = _campus_build_profile_path(existing_config)
+        job_id = _CAMPUS_BUILD_MANAGER.submit(profile_path, harvesters, existing_config)
+    except (TypeError, ValueError, OSError, json.JSONDecodeError) as exc:
+        return jsonify({'success': False, 'message': str(exc)}), 400
+    return jsonify({'success': True, 'jobId': job_id, 'status': 'queued'}), 202
+
+
+@app.route('/api/campus/build/<job_id>', methods=['GET'])
+def get_campus_build(job_id):
+    if len(job_id) != 32 or not all(char in '0123456789abcdef' for char in job_id):
+        return jsonify({'success': False, 'message': 'job id is invalid'}), 400
+    record = _CAMPUS_BUILD_MANAGER.get(job_id)
+    if record is None:
+        return jsonify({'success': False, 'message': 'job not found'}), 404
+    record.pop('profile', None)
+    if record.get('output'):
+        record['output'] = job_id
+    return jsonify({'success': True, **record})
+
+
+def _campus_job_output(job_id):
+    if len(job_id) != 32 or not all(char in '0123456789abcdef' for char in job_id):
+        raise ValueError('job id is invalid')
+    output = _CAMPUS_BUILD_MANAGER.output_path(job_id)
+    if output is None or not output.is_dir():
+        raise LookupError('job not found')
+    return output
+
+
+@app.route('/api/campus/build/<job_id>/review', methods=['GET'])
+def campus_build_review(job_id):
+    try:
+        output = _campus_job_output(job_id)
+        return jsonify({'success': True, 'jobId': job_id, **load_review(output)})
+    except ValueError as exc:
+        return jsonify({'success': False, 'message': str(exc)}), 400
+    except LookupError as exc:
+        return jsonify({'success': False, 'message': str(exc)}), 404
+
+
+@app.route('/api/campus/build/<job_id>/review', methods=['POST'])
+def update_campus_build_review(job_id):
+    data = request.get_json(silent=True) or {}
+    try:
+        output = _campus_job_output(job_id)
+        result = apply_review(output, data.get('decisions'))
+        return jsonify({'success': True, 'jobId': job_id, **result})
+    except (TypeError, ValueError) as exc:
+        return jsonify({'success': False, 'message': str(exc)}), 400
+    except LookupError as exc:
+        return jsonify({'success': False, 'message': str(exc)}), 404
+
+
+@app.route('/api/campus/build/<job_id>/preview', methods=['POST'])
+def submit_campus_build_preview(job_id):
+    try:
+        _campus_job_output(job_id)
+        _CAMPUS_BUILD_MANAGER.submit_preview(job_id)
+        return jsonify({'success': True, 'jobId': job_id, 'previewStatus': 'queued'}), 202
+    except ValueError as exc:
+        return jsonify({'success': False, 'message': str(exc)}), 400
+    except LookupError as exc:
+        return jsonify({'success': False, 'message': str(exc)}), 404
+
+
+@app.route('/api/campus/build/<job_id>/publish-plan', methods=['GET'])
+def get_campus_build_publish_plan(job_id):
+    """Return a diff without changing formal POI assets."""
+    try:
+        output = _campus_job_output(job_id)
+        return jsonify({'success': True, 'jobId': job_id,
+                        'plan': build_publish_plan(output)})
+    except (ValueError, OSError, json.JSONDecodeError) as exc:
+        return jsonify({'success': False, 'message': str(exc)}), 400
+    except LookupError as exc:
+        return jsonify({'success': False, 'message': str(exc)}), 404
+
+
+@app.route('/api/campus/build/<job_id>/publish', methods=['POST'])
+def publish_campus_build(job_id):
+    """Publish only after the caller explicitly confirms the displayed diff."""
+    if not _review_token_ok():
+        return _review_denied()
+    data = request.get_json(silent=True) or {}
+    try:
+        output = _campus_job_output(job_id)
+        result = _publish_campus_build(
+            output,
+            confirm=data.get('confirm') is True,
+            expected_after_hash=data.get('expectedAfterHash'),
+        )
+        return jsonify({'success': True, 'jobId': job_id, **result})
+    except (TypeError, ValueError, OSError, json.JSONDecodeError) as exc:
+        return jsonify({'success': False, 'message': str(exc)}), 400
+    except LookupError as exc:
+        return jsonify({'success': False, 'message': str(exc)}), 404
+
+
+@app.route('/api/campus/build/<job_id>/preview/<scene>', methods=['GET'])
+def get_campus_build_preview(job_id, scene):
+    if scene not in SCENE_IDS:
+        return jsonify({'success': False, 'message': 'scene is invalid'}), 400
+    try:
+        output = _campus_job_output(job_id)
+        profile = json.loads((output / 'campus_profile.json').read_text(encoding='utf-8'))
+        slug = str((profile.get('campus') or {}).get('slug') or '')
+        season = request.args.get('season', '').strip().lower()
+        if season and season not in {'spring', 'summer', 'autumn', 'winter'}:
+            return jsonify({'success': False, 'message': 'season is invalid'}), 400
+        suffix = f'_{season}' if season and scene in {'flower_viewing', 'photo'} else ''
+        cache_file = output / 'preview_heatmap_cache' / f'{slug}_{scene}{suffix}.json'
+        if not cache_file.is_file():
+            return jsonify({'success': False, 'message': 'preview is not ready for this scene'}), 404
+        payload = json.loads(cache_file.read_text(encoding='utf-8'))
+        return jsonify({'success': True, 'jobId': job_id, 'preview': payload})
+    except ValueError as exc:
+        return jsonify({'success': False, 'message': str(exc)}), 400
+    except (LookupError, OSError, json.JSONDecodeError) as exc:
+        return jsonify({'success': False, 'message': str(exc)}), 404
+
+
+@app.route('/api/campus/discover', methods=['POST'])
+def submit_campus_discovery():
+    """Resolve a natural-language campus request and queue multi-source harvest."""
+    data = request.get_json(silent=True) or {}
+    try:
+        query = data.get('query')
+        include_amap = data.get('includeAmap', True)
+        include_web = data.get('includeWeb', True)
+        if include_amap and not os.getenv('AMAP_WEB_SERVICE_KEY', '').strip():
+            raise ValueError('高德 POI 采集未配置 AMAP_WEB_SERVICE_KEY，请在项目根目录 .env 配置后重启后端；也可以关闭高德采集并提供公开网页 URL')
+        cache = HarvestCache(_CAMPUS_BUILD_ROOT / 'cache')
+        orchestrator = DiscoveryOrchestrator(
+            CampusProfileResolver(api_key=os.getenv('AMAP_WEB_SERVICE_KEY')),
+            cache=cache,
+        )
+        plan = orchestrator.plan(
+            query,
+            keywords=data.get('keywords'),
+            web_urls=data.get('webUrls'),
+            include_amap=include_amap,
+            include_web=include_web,
+        )
+        harvesters = orchestrator.harvesters(
+            plan,
+            include_amap=include_amap,
+            include_web=include_web,
+        )
+        existing_config = data.get('baseConfig')
+        if existing_config:
+            existing_config = _campus_build_profile_path(existing_config)
+        job_id = _CAMPUS_BUILD_MANAGER.submit_profile(
+            plan.profile, harvesters, existing_config,
+            metadata={'query': plan.query, 'theme': plan.theme,
+                      'targetCategory': plan.targetCategory,
+                      'keywords': plan.keywords, 'discoveryWarnings': plan.warnings,
+                      'discovery': plan.profile.get('discovery', {})},
+        )
+    except (TypeError, ValueError, OSError, json.JSONDecodeError, RuntimeError) as exc:
+        return jsonify({'success': False, 'message': str(exc)}), 400
+    return jsonify({
+        'success': True,
+        'jobId': job_id,
+        'status': 'queued',
+        'profile': plan.profile,
+        'theme': plan.theme,
+        'keywords': plan.keywords,
+        'sources': plan.sources,
+        'warnings': plan.warnings,
+    }), 202
 
 # 加载植物模板数据（一次性加载到内存）
 _HEATMAP_STORE = HeatmapStore(_BASE)
