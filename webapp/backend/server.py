@@ -39,6 +39,7 @@ from tools.campus_generator.jobs import (BuildJobManager, JobCapacityError,
                                          JobNotReadyError)
 from tools.campus_generator.discovery import (CampusProfileResolver,
                                                 DiscoveryOrchestrator)
+from tools.campus_generator.web_search import WebSearchClient
 from tools.campus_generator.review import apply_review, load_review
 from tools.campus_generator.publish import (build_publish_plan, formal_assets_guard,
                                              publish as _publish_campus_build)
@@ -330,23 +331,66 @@ def submit_campus_discovery():
     if not _review_token_ok():
         return _review_denied()
     data = request.get_json(silent=True) or {}
+    capacity_reservation = None
     try:
         query = data.get('query')
         include_amap = data.get('includeAmap', True)
         include_web = data.get('includeWeb', True)
+        # API callers must opt in because each search can consume provider
+        # quota.  The campus-build UI sends this flag explicitly.
+        auto_search = data.get('autoSearch', False)
+        if not all(isinstance(value, bool) for value in
+                   (include_amap, include_web, auto_search)):
+            raise ValueError('includeAmap、includeWeb 和 autoSearch 必须是布尔值')
         if include_amap and not os.getenv('AMAP_WEB_SERVICE_KEY', '').strip():
             raise ValueError('高德 POI 采集未配置 AMAP_WEB_SERVICE_KEY，请在项目根目录 .env 配置后重启后端；也可以关闭高德采集并提供公开网页 URL')
         cache = HarvestCache(_CAMPUS_BUILD_ROOT / 'cache')
+        search_provider = os.getenv('WEB_SEARCH_PROVIDER', 'tavily').strip().lower()
+        search_client = None
+        search_unavailable = None
+        if include_web and auto_search:
+            key_names = {
+                'tavily': 'TAVILY_API_KEY',
+                'brave': 'BRAVE_SEARCH_API_KEY',
+            }
+            if search_provider not in key_names:
+                raise ValueError(
+                    f'WEB_SEARCH_PROVIDER={search_provider!r} 不受支持，请使用 tavily 或 brave'
+                )
+            key_name = key_names[search_provider]
+            search_api_key = os.getenv(key_name, '').strip()
+            if not search_api_key or search_api_key.startswith('replace-with-'):
+                search_unavailable = (
+                    f'自动搜索未启用：请在项目根目录 .env 配置 {key_name} 后重启后端；'
+                    '本次仍会运行已登记数据、手工网址和已启用的高德来源'
+                )
+            else:
+                search_client = WebSearchClient(
+                    search_provider,
+                    search_api_key,
+                    cache,
+                    max_results=int(os.getenv('WEB_SEARCH_MAX_RESULTS', '10')),
+                    per_domain_limit=int(os.getenv('WEB_SEARCH_PER_DOMAIN_LIMIT', '2')),
+                    max_queries=int(os.getenv('WEB_SEARCH_MAX_QUERIES', '2')),
+                    timeout=float(os.getenv('WEB_SEARCH_TIMEOUT', '8')),
+                )
         orchestrator = DiscoveryOrchestrator(
             CampusProfileResolver(api_key=os.getenv('AMAP_WEB_SERVICE_KEY')),
             cache=cache,
+            web_search=search_client,
+            web_search_unavailable=search_unavailable,
+            web_search_provider=search_provider,
         )
+        # Reserve before calling a metered search API.  This keeps a full
+        # local queue from consuming provider credits for a job it cannot run.
+        capacity_reservation = _CAMPUS_BUILD_MANAGER.reserve_capacity()
         plan = orchestrator.plan(
             query,
             keywords=data.get('keywords'),
             web_urls=data.get('webUrls'),
             include_amap=include_amap,
             include_web=include_web,
+            auto_search=auto_search,
         )
         harvesters = orchestrator.harvesters(
             plan,
@@ -361,12 +405,18 @@ def submit_campus_discovery():
             metadata={'query': plan.query, 'theme': plan.theme,
                       'targetCategory': plan.targetCategory,
                       'keywords': plan.keywords, 'discoveryWarnings': plan.warnings,
-                      'discovery': plan.profile.get('discovery', {})},
+                      'discovery': plan.profile.get('discovery', {}),
+                      'webSearch': plan.webSearch},
+            reservation=capacity_reservation,
         )
+        capacity_reservation = None
     except JobCapacityError as exc:
         return jsonify({'success': False, 'message': str(exc)}), 503
     except (TypeError, ValueError, OSError, json.JSONDecodeError, RuntimeError) as exc:
         return jsonify({'success': False, 'message': str(exc)}), 400
+    finally:
+        if capacity_reservation is not None:
+            _CAMPUS_BUILD_MANAGER.release_capacity(capacity_reservation)
     return jsonify({
         'success': True,
         'jobId': job_id,
@@ -376,6 +426,7 @@ def submit_campus_discovery():
         'keywords': plan.keywords,
         'sources': plan.sources,
         'warnings': plan.warnings,
+        'webSearch': plan.webSearch,
     }), 202
 
 # 加载植物模板数据（一次性加载到内存）

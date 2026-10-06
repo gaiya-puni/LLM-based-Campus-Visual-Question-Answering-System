@@ -115,6 +115,23 @@ python -m tools.campus_generator.cli harvest-web `
 高德读取环境变量 `AMAP_WEB_SERVICE_KEY`；网页采集只接受公开 HTTPS 页面，
 不跟随重定向、不访问私有 IP、不把普通网页文本直接当成有坐标地点。
 
+自然语言发现接口还可以先通过搜索 API 自动寻找公开网页。项目支持 Tavily 和 Brave Search，
+默认使用 Tavily；在项目根目录 `.env` 配置以下任意一组后重启 Flask 后端：
+
+```dotenv
+WEB_SEARCH_PROVIDER=tavily
+TAVILY_API_KEY=tvly-你的密钥
+
+# 或者：
+# WEB_SEARCH_PROVIDER=brave
+# BRAVE_SEARCH_API_KEY=你的密钥
+```
+
+可用 `WEB_SEARCH_MAX_RESULTS`（默认 10）、`WEB_SEARCH_PER_DOMAIN_LIMIT`（默认 2）、
+`WEB_SEARCH_MAX_QUERIES`（默认 2）和 `WEB_SEARCH_TIMEOUT`（默认 8 秒）控制任务预算。
+这里的“自动搜索”是搜索服务索引覆盖范围内的公开网页发现，并不等同于无边界爬取整个互联网。
+搜索结果只提供 URL 和证据；后续读取仍使用上述安全限制，也不会自动发布为正式数据。
+
 `jobs.py` 提供进程内 `BuildJobManager`，任务状态为 `queued/running/completed/blocked/failed`，
 输出始终写入独立任务目录。每次状态变化都会原子写入 `job_state.json`；后端重启后，已完成任务仍可按原
 `jobId` 载入，重启时尚未结束的构建或预览会明确恢复为 `failed/interrupted`，提示用户重新提交，避免页面
@@ -150,6 +167,7 @@ X-Review-Token: <USERDATA_REVIEW_TOKEN>
 
 {
   "query": "帮我做华东师范大学闵行校区的约会热力图",
+  "autoSearch": true,
   "webUrls": ["https://example.edu/campus"]
 }
 ```
@@ -158,8 +176,9 @@ X-Review-Token: <USERDATA_REVIEW_TOKEN>
 
 1. 从本地 `campuses.json` 解析已登记学校/校区；未知校区才使用高德地理编码补齐中心点。
 2. 根据自然语言主题生成有限关键词。
-3. 载入已登记的真实植物和场景点位；高德和公开网页按主题补充步道、运动场、体育馆、河岸、亭子、桥、草坪和植物等候选，并排除明显商业噪声。
-4. 返回 `jobId`，通过 `GET /api/campus/build/<job_id>` 查询状态。
+3. 按学校、校区和主题生成最多两条搜索查询，自动发现并去重最多十个公开 HTTPS 页面；手工 `webUrls` 会一起保留。
+4. 载入已登记的真实植物和场景点位；高德和公开网页按主题补充步道、运动场、体育馆、河岸、亭子、桥、草坪和植物等候选，并排除明显商业噪声。搜索摘要命中某个有辨识度的高德地点名时，只记录为不参与质量加分的搜索线索，继续使用高德 GCJ-02 坐标；只有成功安全抓取的页面才算网页证据，也不会把网页 WGS84 坐标改标签冒充。
+5. 返回 `jobId` 和有界的 `webSearch` 审计摘要，通过 `GET /api/campus/build/<job_id>` 查询状态。缺少搜索 Key 或搜索服务暂时不可用时会明确警告，并继续运行手工网址、已登记数据和其他已启用来源。
 
 任务输出写入 `webapp/backend/userdata/campus_builds/<job_id>/`，包括发现 profile、规范化 POI、待审核 POI 和构建报告；不会自动发布到正式校区配置或热图缓存。
 

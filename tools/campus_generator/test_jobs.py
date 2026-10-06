@@ -233,6 +233,28 @@ class BuildJobPersistenceTests(unittest.TestCase):
 
 
 class BuildJobSafetyTests(unittest.TestCase):
+    def test_capacity_reservation_blocks_competitors_and_is_consumed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            candidates = root / "candidates.json"
+            candidates.write_text("[]", encoding="utf-8")
+            manager = BuildJobManager(
+                root / "jobs", max_workers=1, max_pending_tasks=1, max_jobs=2,
+            )
+            try:
+                reservation = manager.reserve_capacity()
+                with self.assertRaisesRegex(JobCapacityError, "queue is full"):
+                    manager.reserve_capacity()
+                with self.assertRaisesRegex(JobCapacityError, "queue is full"):
+                    manager.submit_profile(PROFILE, [JsonHarvester(candidates)])
+                job_id = manager.submit_profile(
+                    PROFILE, [JsonHarvester(candidates)], reservation=reservation,
+                )
+                self.assertEqual(_wait_for_terminal(manager, job_id)["status"], "completed")
+                manager.release_capacity(reservation)  # consumed tokens are safe no-ops
+            finally:
+                manager.shutdown()
+
     def test_metadata_allowlist_rejects_identity_and_status_overrides(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -267,6 +289,54 @@ class BuildJobSafetyTests(unittest.TestCase):
                 self.assertEqual(report["theme"], "photo")
             finally:
                 manager.shutdown()
+
+    def test_web_search_metadata_is_persisted_reported_and_restored(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            jobs = root / "jobs"
+            candidates = root / "candidates.json"
+            candidates.write_text("[]", encoding="utf-8")
+            audit = {
+                "schemaVersion": 1,
+                "requested": True,
+                "provider": "brave",
+                "status": "completed",
+                "queries": ["demo campus guide"],
+                "results": [{
+                    "url": "https://example.edu/guide",
+                    "title": "Campus guide",
+                    "query": "demo campus guide",
+                    "rank": 1,
+                }],
+                "acceptedUrlCount": 1,
+            }
+            expected = json.loads(json.dumps(audit))
+            manager = BuildJobManager(jobs)
+            try:
+                job_id = manager.submit_profile(
+                    PROFILE,
+                    [JsonHarvester(candidates)],
+                    metadata={"webSearch": audit},
+                )
+                audit["status"] = "mutated-after-submit"
+                record = _wait_for_terminal(manager, job_id)
+                self.assertEqual(record["webSearch"], expected)
+                state = json.loads(
+                    (jobs / job_id / "job_state.json").read_text(encoding="utf-8")
+                )
+                report = json.loads(
+                    (jobs / job_id / "build_report.json").read_text(encoding="utf-8")
+                )
+                self.assertEqual(state["webSearch"], expected)
+                self.assertEqual(report["webSearch"], expected)
+            finally:
+                manager.shutdown()
+
+            restored = BuildJobManager(jobs)
+            try:
+                self.assertEqual(restored.get(job_id)["webSearch"], expected)
+            finally:
+                restored.shutdown()
 
     def test_pending_queue_is_bounded_without_adding_rejected_job(self):
         with tempfile.TemporaryDirectory() as directory:

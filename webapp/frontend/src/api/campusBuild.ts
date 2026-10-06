@@ -3,6 +3,16 @@ import { getReviewToken } from './userdata';
 export type BuildStatus = 'queued' | 'running' | 'completed' | 'blocked' | 'failed';
 export type ReviewStatus = 'pending' | 'approved' | 'rejected';
 
+export interface WebSearchAudit {
+  schemaVersion: number;
+  requested: boolean;
+  provider?: 'tavily' | 'brave' | string | null;
+  status: 'not_requested' | 'unconfigured' | 'completed' | 'empty' | 'failed';
+  queries: string[];
+  results: Array<{ url: string; title?: string; query?: string; rank?: number }>;
+  acceptedUrlCount: number;
+}
+
 export interface CandidatePoi {
   id: string;
   name: string;
@@ -47,6 +57,7 @@ export interface BuildJob {
   pendingInvalid?: number;
   warnings?: string[];
   discoveryWarnings?: string[];
+  webSearch?: WebSearchAudit;
   error?: string | null;
   previewStatus?: string;
   previewError?: string | null;
@@ -106,7 +117,17 @@ export function submitCampusDiscovery(payload: {
   keywords?: string[];
   includeAmap?: boolean;
   includeWeb?: boolean;
-}): Promise<{ success: boolean; jobId: string; profile: ReviewBundle['profile']; theme: string; keywords: string[] }> {
+  autoSearch?: boolean;
+}): Promise<{
+  success: boolean;
+  jobId: string;
+  profile: ReviewBundle['profile'];
+  theme: string;
+  keywords: string[];
+  sources: string[];
+  warnings: string[];
+  webSearch: WebSearchAudit;
+}> {
   return fetch('/api/campus/discover', {
     method: 'POST',
     headers: {

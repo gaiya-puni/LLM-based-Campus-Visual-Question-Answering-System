@@ -11,7 +11,7 @@ import json
 import math
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, is_dataclass
 from pathlib import Path
 from typing import Callable
 
@@ -20,6 +20,7 @@ import requests
 from .harvest import (AmapPoiHarvester, HarvestCache, Harvester, HarvestResult,
                        PublicWebHarvester)
 from .profile import validate_profile
+from .web_search import WebSearchClient
 
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -36,6 +37,9 @@ class DiscoveryPlan:
     sources: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     targetCategory: str = "mixed"
+    searchQueries: list[str] = field(default_factory=list)
+    searchResults: list[dict] = field(default_factory=list)
+    webSearch: dict = field(default_factory=dict)
 
 
 THEME_KEYWORDS = {
@@ -55,6 +59,21 @@ THEME_PLANT_KEYWORDS = {
     "photo": ["植物", "樱花", "银杏"],
     "flower": PLANT_KEYWORDS,
     "general": ["树木", "植物", "绿化"],
+}
+
+THEME_SEARCH_TERMS = {
+    "walk": "散步 步道 绿地 河岸 校园景点",
+    "date": "约会 花园 湖泊 亭子 校园景点",
+    "photo": "拍照 摄影 建筑 雕塑 校园景点",
+    "flower": "赏花 樱花 银杏 植物 花园",
+    "study": "学习 自习 图书馆 教学楼",
+    "food": "食堂 餐厅 咖啡 校园美食",
+    "general": "校园 景点 植物 建筑",
+}
+
+_GENERIC_SEARCH_MATCH_NAMES = {
+    "图书馆", "体育馆", "运动场", "食堂", "餐厅", "咖啡店", "花园",
+    "草坪", "湖泊", "河岸", "亭子", "教学楼", "校门", "广场",
 }
 PLANT_EVIDENCE_TERMS = tuple(PLANT_KEYWORDS + ["园林", "苗圃", "绿地", "植物园", "花园", "樱园", "梅园", "荷塘"])
 NON_CAMPUS_PLANT_TERMS = (
@@ -144,6 +163,39 @@ def _scoped_keyword(profile: dict, keyword: str) -> str:
     if campus_label and "校区" not in campus_label:
         campus_label += "校区"
     return " ".join(value for value in (school, campus_label, keyword) if value)
+
+
+def _search_queries(profile: dict, theme: str, keywords: list[str]) -> list[str]:
+    """Build a small, reproducible search budget for one campus request."""
+    scope = _scoped_keyword(profile, "")
+    theme_terms = THEME_SEARCH_TERMS.get(theme) or THEME_SEARCH_TERMS["general"]
+    focused = " ".join(keywords[:6])
+    return list(dict.fromkeys(filter(None, (
+        f"{scope} {theme_terms}".strip(),
+        f"{scope} {focused}".strip(),
+    ))))[:2]
+
+
+def _search_hit_dict(hit) -> dict:
+    if isinstance(hit, dict):
+        value = dict(hit)
+    elif is_dataclass(hit):
+        value = asdict(hit)
+    elif hasattr(hit, "to_dict"):
+        value = dict(hit.to_dict())
+    else:
+        raise TypeError("web search returned an unsupported hit object")
+    # Search evidence is persisted with a deliberately small allowlist.  Raw
+    # provider responses and credentials must never enter job metadata.
+    return {
+        key: value[key]
+        for key in ("provider", "query", "rank", "url", "title", "snippet", "score")
+        if key in value and value[key] not in (None, "")
+    }
+
+
+def _matchable_name(value: str) -> str:
+    return re.sub(r"[\s·•・()（）\[\]【】_-]+", "", str(value or "")).lower()
 
 
 def _keyword_matches_candidate(item: dict, keyword: str) -> bool:
@@ -510,17 +562,114 @@ class SceneWebHarvester:
         return HarvestResult(candidates, self.source, warnings)
 
 
+class SearchEvidenceEnricher:
+    """Attach bounded search provenance to candidates without inventing coordinates.
+
+    A URL match annotates an already-fetched web candidate.  A sufficiently
+    distinctive exact place-name match is retained only as a non-scoring lead
+    on an AMap candidate while preserving the provider's GCJ-02 coordinates.
+    Search data never auto-approves a candidate or replaces its primary source.
+    """
+
+    def __init__(self, delegate: Harvester, search_results: list[dict],
+                 profile: dict | None = None):
+        self.delegate = delegate
+        self.source = getattr(delegate, "source", delegate.__class__.__name__)
+        self.search_results = [dict(item) for item in search_results if isinstance(item, dict)]
+        school = (profile or {}).get("school") or {}
+        identity_values = [
+            school.get("name"), school.get("enName"), *(school.get("aliases") or []),
+        ]
+        self.identity_terms = {
+            term for value in identity_values
+            if len(term := _matchable_name(str(value or ""))) >= 2
+        }
+
+    @staticmethod
+    def _urls(candidate: dict) -> set[str]:
+        values = candidate.get("sourceUrls") or []
+        if isinstance(values, str):
+            values = [values]
+        return {str(value).split("#", 1)[0] for value in values if str(value).strip()}
+
+    def _matches(self, candidate: dict) -> list[dict]:
+        candidate_urls = self._urls(candidate)
+        name = str(candidate.get("name") or candidate.get("locationName") or "").strip()
+        normalized_name = _matchable_name(name)
+        distinctive_name = (
+            len(normalized_name) >= 3 and name not in _GENERIC_SEARCH_MATCH_NAMES
+        )
+        matches = []
+        for hit in self.search_results:
+            url = str(hit.get("url") or "").split("#", 1)[0]
+            text = _matchable_name(" ".join((
+                str(hit.get("title") or ""), str(hit.get("snippet") or ""),
+            )))
+            campus_match = not self.identity_terms or any(
+                term in text for term in self.identity_terms
+            )
+            if (url and url in candidate_urls) or (
+                    distinctive_name and campus_match and normalized_name in text):
+                matches.append(hit)
+        return matches[:3]
+
+    def collect(self) -> HarvestResult:
+        result = self.delegate.collect()
+        enriched = []
+        for original in result.candidates:
+            matches = self._matches(original)
+            if not matches:
+                enriched.append(original)
+                continue
+            candidate = dict(original)
+            source_urls = candidate.get("sourceUrls") or []
+            if isinstance(source_urls, str):
+                source_urls = [source_urls]
+            primary_source = str(candidate.get("source") or self.source)
+            candidate_urls = {
+                str(value).split("#", 1)[0]
+                for value in source_urls if str(value).strip()
+            }
+            direct_page_matches = [
+                hit for hit in matches
+                if str(hit.get("url") or "").split("#", 1)[0] in candidate_urls
+            ]
+            evidence = candidate.get("evidence") or {}
+            if not isinstance(evidence, dict):
+                evidence = {}
+            candidate["evidence"] = {
+                **evidence,
+                # A search snippet is a lead, not proof that the destination
+                # page was fetched or that it is independent of AMap.  Only
+                # an exact URL match on an already-fetched web candidate is
+                # called evidence; name-only AMap matches remain non-scoring.
+                "searchEvidence" if direct_page_matches else "searchLeads": [{
+                    key: hit[key]
+                    for key in ("provider", "query", "rank", "url", "title", "snippet")
+                    if key in hit
+                } for hit in (direct_page_matches or matches)],
+            }
+            enriched.append(candidate)
+        return HarvestResult(enriched, result.source, list(result.warnings))
+
+
 class DiscoveryOrchestrator:
     """Turn one natural-language request into a reproducible harvest plan."""
 
     def __init__(self, resolver: CampusProfileResolver | None = None,
-                 *, cache: HarvestCache | None = None):
+                 *, cache: HarvestCache | None = None,
+                 web_search: WebSearchClient | None = None,
+                 web_search_unavailable: str | None = None,
+                 web_search_provider: str | None = None):
         self.resolver = resolver or CampusProfileResolver()
         self.cache = cache
+        self.web_search = web_search
+        self.web_search_unavailable = str(web_search_unavailable or "").strip()
+        self.web_search_provider = str(web_search_provider or "").strip().lower() or None
 
     def plan(self, query: str, *, keywords: list[str] | None = None,
              web_urls: list[str] | None = None, include_amap: bool = True,
-             include_web: bool = True) -> DiscoveryPlan:
+             include_web: bool = True, auto_search: bool = False) -> DiscoveryPlan:
         profile = self.resolver.resolve(query)
         theme = infer_theme(query)
         plant_keywords = list(THEME_PLANT_KEYWORDS.get(theme) or THEME_PLANT_KEYWORDS["general"])
@@ -529,16 +678,82 @@ class DiscoveryOrchestrator:
             selected.extend(THEME_KEYWORDS.get(theme) or THEME_KEYWORDS["general"])
         selected.extend(str(item).strip() for item in (keywords or []) if str(item).strip())
         selected = list(dict.fromkeys(selected))[:20]
-        urls = list(dict.fromkeys(str(item).strip() for item in (web_urls or []) if str(item).strip()))[:10]
+        manual_urls = list(dict.fromkeys(
+            str(item).strip() for item in (web_urls or []) if str(item).strip()
+        ))[:10]
+        urls = list(manual_urls)
         sources = []
+        warnings = []
+        search_queries: list[str] = []
+        search_results: list[dict] = []
+        provider = getattr(self.web_search, "provider", None) or self.web_search_provider
+        web_search_audit = {
+            "schemaVersion": 1,
+            "requested": bool(include_web and auto_search),
+            "provider": provider,
+            "status": "not_requested",
+            "queries": [],
+            "results": [],
+            "acceptedUrlCount": 0,
+        }
+        if include_web and auto_search:
+            search_queries = _search_queries(profile, theme, selected)
+            web_search_audit["queries"] = search_queries
+            if self.web_search is None:
+                web_search_audit["status"] = "unconfigured"
+                warning = self.web_search_unavailable or (
+                    "automatic public-web search is not configured; set "
+                    "WEB_SEARCH_PROVIDER and its API key"
+                )
+                warnings.append(warning)
+            else:
+                try:
+                    outcome = self.web_search.search(search_queries)
+                    search_results = [_search_hit_dict(hit) for hit in outcome.hits]
+                    outcome_queries = [str(value) for value in outcome.queries if str(value).strip()]
+                    if outcome_queries:
+                        search_queries = outcome_queries
+                        web_search_audit["queries"] = search_queries
+                    warnings.extend(str(value) for value in outcome.warnings if str(value).strip())
+                    automatic_urls = [str(item.get("url") or "") for item in search_results]
+                    urls = list(dict.fromkeys([*manual_urls, *automatic_urls]))[:10]
+                    accepted = set(urls)
+                    accepted_results = [item for item in search_results if item.get("url") in accepted]
+                    search_results = accepted_results
+                    web_search_audit.update({
+                        "provider": getattr(outcome, "provider", provider),
+                        "status": (
+                            "completed" if search_results else
+                            "failed" if outcome.warnings else "empty"
+                        ),
+                        "acceptedUrlCount": len(search_results),
+                        "results": [{
+                            key: item[key]
+                            for key in ("url", "title", "query", "rank") if key in item
+                        } for item in search_results],
+                    })
+                    if search_results:
+                        sources.append("web_search")
+                except (requests.RequestException, OSError, RuntimeError) as exc:
+                    web_search_audit["status"] = "failed"
+                    warnings.append(
+                        f"automatic public-web search failed ({type(exc).__name__}); "
+                        "manual URLs, campus registry and AMap sources will still run"
+                    )
         if include_amap:
             sources.append("amap")
         if include_web and urls:
             sources.append("public_web")
-        warnings = []
         if include_web and not urls:
-            warnings.append("no public web URLs supplied; registry and AMap scene harvesting will still run")
-        return DiscoveryPlan(str(query), profile, theme, selected, urls, sources, warnings, "mixed")
+            warnings.append(
+                "no public web URLs were discovered or supplied; registry and AMap harvesting will still run"
+            )
+        return DiscoveryPlan(
+            query=str(query), profile=profile, theme=theme, keywords=selected,
+            web_urls=urls, sources=sources, warnings=warnings,
+            targetCategory="mixed", searchQueries=search_queries,
+            searchResults=search_results, webSearch=web_search_audit,
+        )
 
     def harvesters(self, plan: DiscoveryPlan, *, include_amap: bool = True,
                    include_web: bool = True) -> list[Harvester]:
@@ -549,16 +764,43 @@ class DiscoveryOrchestrator:
         if include_amap:
             plant_keywords = [word for word in plan.keywords if word in
                               (THEME_PLANT_KEYWORDS.get(plan.theme) or THEME_PLANT_KEYWORDS["general"])]
-            result.append(PlantSupplementHarvester(plan.profile, plant_keywords, cache=self.cache))
+            plant_harvester: Harvester = PlantSupplementHarvester(
+                plan.profile, plant_keywords, cache=self.cache,
+            )
+            if plan.searchResults:
+                plant_harvester = SearchEvidenceEnricher(
+                    plant_harvester, plan.searchResults, plan.profile,
+                )
+            result.append(plant_harvester)
             if plan.theme != "flower":
                 scene_keywords = [word for word in plan.keywords if word in
                                   (THEME_KEYWORDS.get(plan.theme) or THEME_KEYWORDS["general"])]
-                result.append(SceneSupplementHarvester(plan.profile, plan.theme, scene_keywords,
-                                                       cache=self.cache))
+                scene_harvester: Harvester = SceneSupplementHarvester(
+                    plan.profile, plan.theme, scene_keywords, cache=self.cache,
+                )
+                if plan.searchResults:
+                    scene_harvester = SearchEvidenceEnricher(
+                        scene_harvester, plan.searchResults, plan.profile,
+                    )
+                result.append(scene_harvester)
         if include_web and plan.web_urls:
-            result.append(PlantWebHarvester(plan.web_urls, plan.profile, cache=self.cache))
+            plant_web: Harvester = PlantWebHarvester(
+                plan.web_urls, plan.profile, cache=self.cache,
+            )
+            if plan.searchResults:
+                plant_web = SearchEvidenceEnricher(
+                    plant_web, plan.searchResults, plan.profile,
+                )
+            result.append(plant_web)
             if plan.theme != "flower":
-                result.append(SceneWebHarvester(plan.web_urls, plan.theme, plan.profile, cache=self.cache))
+                scene_web: Harvester = SceneWebHarvester(
+                    plan.web_urls, plan.theme, plan.profile, cache=self.cache,
+                )
+                if plan.searchResults:
+                    scene_web = SearchEvidenceEnricher(
+                        scene_web, plan.searchResults, plan.profile,
+                    )
+                result.append(scene_web)
         if not result:
             raise ValueError("discovery plan has no enabled harvest source")
         return result

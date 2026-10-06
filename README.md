@@ -39,6 +39,22 @@ python server.py
 服务商**，避免调用方误判数据流向。后端启动时会在控制台打印当前生效的服务商与模型名，便于排查。
 
 仓库不包含密钥。`.env` 已被 Git 忽略，禁止把真实凭据写回源码或提交到仓库。
+
+**自动搜索公开网页**：校园热力图生成页支持 Tavily（默认）和 Brave Search。在项目根目录
+`.env` 中至少配置 `USERDATA_REVIEW_TOKEN`，再选择并填写一组搜索配置：
+
+```dotenv
+WEB_SEARCH_PROVIDER=tavily
+TAVILY_API_KEY=tvly-你的密钥
+
+# 或改为 brave，并填写 BRAVE_SEARCH_API_KEY
+```
+
+重启后端后打开 `http://localhost/#/campus-build`，勾选“自动搜索公开网页”即可。系统只把搜索
+结果作为候选来源：最多两条查询、十个 HTTPS 页面、每域默认两页；页面还会经过公网地址、重定向、
+类型和大小校验，最终必须人工审核。完整配置和接口示例见
+[校园资产生成器说明](tools/campus_generator/CAMPUS_GENERATOR.md)。
+
 仓库已包含当前 3122 条 POI 对应的语义向量索引；新增、删除、重命名 POI 文件或修改场景语料后，
 运行时会明确标记索引过期，此时需要运行 `build_semantic_index.py` 重新生成。
 

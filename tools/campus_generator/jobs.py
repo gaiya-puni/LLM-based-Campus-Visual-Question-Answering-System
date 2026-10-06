@@ -46,7 +46,7 @@ class BuildJobManager:
     READ_ONLY_OPERATIONS = frozenset({"review-read", "publish-plan", "preview-read"})
     METADATA_FIELDS = frozenset({
         "query", "theme", "targetCategory", "keywords", "discovery",
-        "discoveryWarnings", "warnings",
+        "discoveryWarnings", "webSearch", "warnings",
     })
     LEGACY_BUNDLE_FILES = {
         "campus_profile.json": dict,
@@ -70,6 +70,7 @@ class BuildJobManager:
         self._jobs: dict[str, dict] = {}
         self._job_locks: dict[str, threading.RLock] = {}
         self._pending_tasks = 0
+        self._capacity_reservations: set[str] = set()
         self._load_existing_jobs()
 
     @staticmethod
@@ -211,18 +212,39 @@ class BuildJobManager:
             if persist:
                 self._persist_locked(job_id)
 
-    def _check_capacity_locked(self, *, new_job: bool) -> None:
-        if self._pending_tasks >= self.max_pending_tasks:
+    def _check_capacity_locked(self, *, new_job: bool,
+                               reservation: str | None = None) -> None:
+        owns_reservation = reservation in self._capacity_reservations
+        reserved_by_others = len(self._capacity_reservations) - int(owns_reservation)
+        if self._pending_tasks + reserved_by_others >= self.max_pending_tasks:
             raise JobCapacityError("campus build queue is full; try again later")
-        if new_job and len(self._jobs) >= self.max_jobs:
+        if new_job and len(self._jobs) + reserved_by_others >= self.max_jobs:
             raise JobCapacityError("campus job limit has been reached")
+
+    def reserve_capacity(self) -> str:
+        """Atomically reserve one future build slot before paid discovery calls."""
+        token = uuid.uuid4().hex
+        with self._lock:
+            self._check_capacity_locked(new_job=True)
+            self._capacity_reservations.add(token)
+        return token
+
+    def release_capacity(self, reservation: str) -> None:
+        """Release an unused reservation; consuming a token makes this a no-op."""
+        with self._lock:
+            self._capacity_reservations.discard(str(reservation or ""))
 
     def _task_done(self, _future: Future) -> None:
         with self._lock:
             self._pending_tasks = max(0, self._pending_tasks - 1)
 
-    def _submit_new_locked(self, job_id: str, record: dict, function, *args) -> None:
-        self._check_capacity_locked(new_job=True)
+    def _submit_new_locked(self, job_id: str, record: dict, function, *args,
+                           reservation: str | None = None) -> None:
+        if reservation is not None and reservation not in self._capacity_reservations:
+            raise JobCapacityError("campus build capacity reservation is invalid or expired")
+        self._check_capacity_locked(new_job=True, reservation=reservation)
+        if reservation is not None:
+            self._capacity_reservations.remove(reservation)
         self._jobs[job_id] = record
         self._job_locks[job_id] = threading.RLock()
         self._pending_tasks += 1
@@ -258,7 +280,8 @@ class BuildJobManager:
 
     def submit_profile(self, profile: dict, harvesters: list[Harvester],
                        existing_config: str | Path | None = None,
-                       metadata: dict | None = None) -> str:
+                       metadata: dict | None = None,
+                       *, reservation: str | None = None) -> str:
         """Submit a generated profile without exposing a caller-controlled path."""
         if not isinstance(profile, dict):
             raise ValueError("profile must be an object")
@@ -285,10 +308,13 @@ class BuildJobManager:
         record.update({key: copy.deepcopy(value) for key, value in metadata.items()
                        if key != "warnings"})
         with self._lock:
-            self._check_capacity_locked(new_job=True)
+            if reservation is not None and reservation not in self._capacity_reservations:
+                raise JobCapacityError("campus build capacity reservation is invalid or expired")
+            self._check_capacity_locked(new_job=True, reservation=reservation)
             write_json(profile_path, profile)
             self._submit_new_locked(
                 job_id, record, self._run, profile_path, harvesters, existing_config,
+                reservation=reservation,
             )
         return job_id
 

@@ -18,7 +18,7 @@
         placeholder="例如：帮我做华东师范大学闵行校区的约会热力图"
       />
       <div class="request-options">
-        <el-input v-model="webUrlsText" placeholder="公开网页 URL（可选，多个用换行分隔）" />
+        <el-input v-model="webUrlsText" placeholder="补充公开网页 URL（可选，多个用换行分隔）" />
         <el-button type="primary" :loading="submitting" :disabled="!query.trim()" @click="submit">
           开始发现
         </el-button>
@@ -26,7 +26,8 @@
       <div class="source-options">
         <el-checkbox v-model="includeAmap">搜索高德 POI</el-checkbox>
         <el-checkbox v-model="includeWeb">采集公开网页</el-checkbox>
-        <span class="source-hint">高德 POI 需要后端配置 AMAP_WEB_SERVICE_KEY；浏览器地图 Key 不能替代。</span>
+        <el-checkbox v-model="autoSearch" :disabled="!includeWeb">自动搜索公开网页</el-checkbox>
+        <span class="source-hint">高德需 AMAP_WEB_SERVICE_KEY；自动搜索需 Tavily 或 Brave Search Key。搜索命中仍须安全采集和人工审核。</span>
       </div>
       <div class="review-token-row">
         <el-input
@@ -53,10 +54,22 @@
         <div><span>候选</span>{{ job.candidateCount ?? 0 }}</div>
         <div><span>通过</span>{{ review?.approved.length ?? job.approvedCount ?? 0 }}</div>
         <div v-if="job.theme"><span>主题</span>{{ themeLabel(job.theme) }}</div>
+        <div v-if="job.webSearch?.requested">
+          <span>网页搜索</span>{{ webSearchLabel(job.webSearch.status) }} · {{ job.webSearch.acceptedUrlCount }} 页
+        </div>
       </div>
       <el-progress v-if="job.status === 'queued' || job.status === 'running'" :percentage="progress" :indeterminate="job.status === 'running'" />
       <p v-if="job.error" class="error">任务失败：{{ job.error }}</p>
       <p v-if="job.discoveryWarnings?.length" class="warning">{{ job.discoveryWarnings.join('；') }}</p>
+      <details v-if="job.webSearch?.results.length" class="search-results">
+        <summary>查看自动发现的网页（{{ job.webSearch.results.length }}）</summary>
+        <ol>
+          <li v-for="item in job.webSearch.results" :key="item.url">
+            <a :href="item.url" target="_blank" rel="noopener noreferrer">{{ item.title || item.url }}</a>
+            <small v-if="item.query">查询：{{ item.query }}</small>
+          </li>
+        </ol>
+      </details>
     </section>
 
     <section v-if="review" class="workspace">
@@ -196,6 +209,7 @@ const query = ref('');
 const webUrlsText = ref('');
 const includeAmap = ref(true);
 const includeWeb = ref(true);
+const autoSearch = ref(true);
 const reviewToken = ref(getReviewToken());
 const jobInput = ref('');
 const job = ref<BuildJob | null>(null);
@@ -255,6 +269,7 @@ let markers: any[] = [];
 let heatLayer: any = null;
 
 const statusLabel = (value?: string) => ({ queued: '排队中', running: '采集中', completed: '待审核', blocked: '已阻塞', failed: '失败' }[value || ''] || value || '未知');
+const webSearchLabel = (value?: string) => ({ not_requested: '未请求', unconfigured: '未配置', completed: '已完成', empty: '无结果', failed: '失败' }[value || ''] || value || '未知');
 const stageLabel = (value?: string) => ({ harvest: '采集来源', normalize: '整理候选', complete: '等待审核', failed: '失败' }[value || ''] || value || '准备中');
 const themeLabel = (value?: string) => ({ walk: '散步', date: '约会', photo: '拍照', flower: '赏花', study: '学习', food: '餐饮', general: '综合' }[value || ''] || value || '综合');
 const sourceLabel = (value?: string) => ({ amap: '高德 POI', amap_plant: '高德植物候选', amap_scene: '高德场景候选', public_web: '公开网页', public_web_plant: '网页植物证据', public_web_scene: '网页场景证据', campus_registry: '已登记植物', scene_registry: '已登记场景', json: 'JSON 来源' }[value || ''] || value || '未知来源');
@@ -362,9 +377,15 @@ const submit = async () => {
       webUrls: webUrlsText.value.split(/\r?\n/).map(item => item.trim()).filter(Boolean),
       includeAmap: includeAmap.value,
       includeWeb: includeWeb.value,
+      autoSearch: autoSearch.value,
     });
     previewScene.value = ({ walk: 'walk', date: 'date', photo: 'photo', flower: 'flower_viewing' } as Record<string, string>)[result.theme] || 'walk';
-    jobInput.value = result.jobId; job.value = { success: true, id: result.jobId, status: 'queued', theme: result.theme, keywords: result.keywords };
+    jobInput.value = result.jobId;
+    job.value = {
+      success: true, id: result.jobId, status: 'queued', theme: result.theme,
+      keywords: result.keywords, sources: result.sources,
+      discoveryWarnings: result.warnings, webSearch: result.webSearch,
+    };
     startPolling();
   } catch (err) { error.value = err instanceof Error ? err.message : '任务提交失败'; }
   finally { submitting.value = false; }
@@ -490,9 +511,10 @@ onBeforeUnmount(() => { if (timer) window.clearInterval(timer); clearMarkers(); 
 .page-header { justify-content: space-between; } h2, h3, p { margin: 0; } h2 { color: #303133; font-size: 21px; } h3 { color: #303133; font-size: 16px; } .page-header p, .panel-head p { color: #909399; font-size: 13px; margin-top: 5px; }
 .request-card, .job-card, .candidate-panel, .map-panel { border: 1px solid #ebeef5; border-radius: 12px; background: #fff; padding: 14px; }
 .request-options { margin-top: 10px; } .request-options .el-input { flex: 1; } .resume-row { margin-top: 10px; max-width: 420px; } .resume-row .el-input { flex: 1; }
-.source-options { display: flex; align-items: center; gap: 12px; margin-top: 9px; } .source-hint { color: #909399; font-size: 12px; }
+.source-options { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 9px; } .source-hint { color: #909399; font-size: 12px; }
 .review-token-row { display: grid; grid-template-columns: minmax(280px, 1fr) 1.4fr; align-items: center; gap: 12px; margin-top: 10px; } .review-token-row span { color: #909399; font-size: 12px; }
 .error { color: #f56c6c; font-size: 13px; margin-top: 8px; } .warning { color: #b88230; font-size: 12px; margin-top: 8px; }
+.search-results { margin-top: 10px; color: #606266; font-size: 12px; } .search-results summary { cursor: pointer; color: #409eff; } .search-results ol { margin: 8px 0 0; padding-left: 22px; } .search-results li { margin: 5px 0; } .search-results a { color: #409eff; word-break: break-all; } .search-results small { display: block; margin-top: 2px; color: #909399; }
 .job-summary { flex-wrap: wrap; color: #606266; font-size: 13px; } .job-summary div { padding-right: 16px; border-right: 1px solid #ebeef5; } .job-summary div:last-child { border-right: 0; } .job-summary span { color: #909399; margin-right: 5px; } code { color: #909399; font-size: 11px; }
 .workspace { display: grid; grid-template-columns: minmax(320px, 430px) minmax(0, 1fr); gap: 14px; min-height: 560px; } .candidate-panel { overflow: auto; max-height: 680px; } .panel-head { justify-content: space-between; align-items: flex-start; } .review-stats { margin: 14px 0 8px; }
 .candidate-item { padding: 11px 10px; margin: 8px 0; border: 1px solid #ebeef5; border-left: 4px solid #e6a23c; border-radius: 9px; cursor: pointer; transition: .15s; } .candidate-item:hover, .candidate-item.selected { background: #fff8f1; border-color: #e6a23c; } .candidate-item.approved { border-left-color: #67c23a; } .candidate-item.rejected { border-left-color: #909399; opacity: .7; } .candidate-title { display: flex; justify-content: space-between; gap: 8px; } .candidate-item p, .candidate-meta { color: #909399; font-size: 12px; margin-top: 5px; } .candidate-meta { display: flex; justify-content: space-between; }

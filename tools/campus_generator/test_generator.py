@@ -15,7 +15,7 @@ from unittest.mock import patch
 from tools.campus_generator.boundary import (covering_radius_m, point_in_polygon,
                                               point_relation)
 from tools.campus_generator.cli import main
-from tools.campus_generator.harvest import JsonHarvester
+from tools.campus_generator.harvest import HarvestResult, JsonHarvester
 from tools.campus_generator.harvest import AmapPoiHarvester, HarvestCache, PublicWebHarvester
 from tools.campus_generator.jobs import BuildJobManager
 from tools.campus_generator.discovery import (CampusProfileResolver,
@@ -23,7 +23,9 @@ from tools.campus_generator.discovery import (CampusProfileResolver,
                                                 infer_theme, _scoped_keyword)
 from tools.campus_generator.discovery import (CampusPlantHarvester, PlantSupplementHarvester,
                                                 PlantWebHarvester, CampusSceneHarvester,
-                                                SceneSupplementHarvester, SceneWebHarvester)
+                                                SceneSupplementHarvester, SceneWebHarvester,
+                                                SearchEvidenceEnricher)
+from tools.campus_generator.web_search import SearchHit, SearchResult
 from tools.campus_generator.publish import build_publish_plan
 from tools.campus_generator import publish as publish_module
 from tools.campus_generator.preview import _write_preview_pois, build_preview
@@ -1330,6 +1332,246 @@ class GeneratorTests(unittest.TestCase):
                 self.assertTrue(response.get_json()["preview"]["available"])
             finally:
                 server._CAMPUS_BUILD_MANAGER = old
+
+    def test_discovery_plan_merges_auto_search_and_manual_urls_with_audit(self):
+        class StaticResolver:
+            @staticmethod
+            def resolve(_query):
+                return PROFILE
+
+        class FakeSearch:
+            provider = "brave"
+
+            def __init__(self):
+                self.queries = []
+
+            def search(self, queries):
+                self.queries = list(queries)
+                query = self.queries[0]
+                return SearchResult([
+                    SearchHit(
+                        "https://manual.example/page", "Manual duplicate", "duplicate",
+                        "brave", query, 1,
+                    ),
+                    SearchHit(
+                        "https://search.example/campus", "Campus guide", "useful result",
+                        "brave", query, 2,
+                    ),
+                ], "brave", self.queries, [])
+
+        search = FakeSearch()
+        plan = DiscoveryOrchestrator(
+            StaticResolver(), web_search=search,
+        ).plan(
+            "demo campus photo",
+            web_urls=["https://manual.example/page"],
+            include_amap=False,
+            include_web=True,
+            auto_search=True,
+        )
+
+        self.assertTrue(search.queries)
+        self.assertEqual(plan.web_urls, [
+            "https://manual.example/page",
+            "https://search.example/campus",
+        ])
+        self.assertEqual([item["url"] for item in plan.searchResults], [
+            "https://manual.example/page",
+            "https://search.example/campus",
+        ])
+        self.assertEqual(plan.sources, ["web_search", "public_web"])
+        self.assertEqual(plan.webSearch["provider"], "brave")
+        self.assertEqual(plan.webSearch["status"], "completed")
+        self.assertEqual(plan.webSearch["queries"], search.queries)
+        self.assertEqual(plan.webSearch["acceptedUrlCount"], 2)
+        self.assertEqual(plan.webSearch["results"], [
+            {
+                "url": "https://manual.example/page",
+                "title": "Manual duplicate",
+                "query": search.queries[0],
+                "rank": 1,
+            },
+            {
+                "url": "https://search.example/campus",
+                "title": "Campus guide",
+                "query": search.queries[0],
+                "rank": 2,
+            },
+        ])
+
+    def test_search_evidence_enricher_preserves_gcj02_and_merges_sources(self):
+        candidate = {
+            "name": "Mirror Lake",
+            "locationName": "Mirror Lake",
+            "lng": 121.123,
+            "lat": 31.456,
+            "coordinateSystem": "GCJ-02",
+            "source": "amap_scene",
+            "sources": ["amap_scene"],
+            "sourceUrls": ["https://official.example/map"],
+            "evidence": {"provider": "Amap", "address": "Demo campus"},
+        }
+
+        class Delegate:
+            source = "amap_scene"
+
+            @staticmethod
+            def collect():
+                return HarvestResult([candidate], "amap_scene", ["fixture warning"])
+
+        hit = {
+            "provider": "brave",
+            "query": "demo campus Mirror Lake",
+            "rank": 1,
+            "url": "https://guide.example/mirror-lake",
+            "title": "Mirror Lake campus guide",
+            "snippet": "Photo guide for Mirror Lake",
+        }
+        result = SearchEvidenceEnricher(Delegate(), [hit]).collect()
+        enriched = result.candidates[0]
+        before_agreement = assess_candidate_quality(candidate)["scores"]["crossSourceAgreement"]
+        after_agreement = assess_candidate_quality(enriched)["scores"]["crossSourceAgreement"]
+
+        self.assertEqual((enriched["lng"], enriched["lat"]), (121.123, 31.456))
+        self.assertEqual(enriched["coordinateSystem"], "GCJ-02")
+        self.assertEqual(enriched["source"], "amap_scene")
+        self.assertEqual(enriched["sources"], ["amap_scene"])
+        self.assertEqual(enriched["sourceUrls"], ["https://official.example/map"])
+        self.assertEqual(enriched["evidence"]["provider"], "Amap")
+        self.assertEqual(enriched["evidence"]["searchLeads"], [hit])
+        self.assertEqual(result.warnings, ["fixture warning"])
+        self.assertNotIn("searchLeads", candidate["evidence"])
+        self.assertEqual(after_agreement, before_agreement)
+
+    def test_discovery_api_degrades_when_search_key_is_missing(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "webapp" / "backend"))
+        import server
+
+        profile = json.loads(json.dumps(PROFILE))
+        profile["discovery"] = {"method": "local_config", "query": "demo campus"}
+
+        class StaticResolver:
+            @staticmethod
+            def resolve(_query):
+                return profile
+
+        class FakeManager:
+            metadata = None
+
+            @staticmethod
+            def reserve_capacity():
+                return "reservation"
+
+            @staticmethod
+            def release_capacity(_reservation):
+                pass
+
+            def submit_profile(self, _profile, _harvesters, _existing=None, *,
+                               metadata=None, reservation=None):
+                self.assert_reservation = reservation
+                self.metadata = metadata
+                return "c" * 32
+
+        manager = FakeManager()
+        server._rate_limit_buckets.clear()
+        with patch.object(server, "_CAMPUS_BUILD_MANAGER", manager), \
+                patch.object(server, "CampusProfileResolver", return_value=StaticResolver()), \
+                patch.dict(os.environ, {
+                    "USERDATA_REVIEW_TOKEN": REVIEW_TOKEN,
+                    "WEB_SEARCH_PROVIDER": "brave",
+                    "BRAVE_SEARCH_API_KEY": "",
+                }):
+            response = server.app.test_client().post(
+                "/api/campus/discover", headers=REVIEW_HEADERS, json={
+                    "query": "demo campus",
+                    "includeAmap": False,
+                    "includeWeb": True,
+                    "autoSearch": True,
+                },
+            )
+
+        self.assertEqual(response.status_code, 202)
+        payload = response.get_json()
+        self.assertEqual(payload["webSearch"]["provider"], "brave")
+        self.assertEqual(payload["webSearch"]["status"], "unconfigured")
+        self.assertTrue(payload["webSearch"]["requested"])
+        self.assertIn("BRAVE_SEARCH_API_KEY", " ".join(payload["warnings"]))
+        self.assertEqual(manager.metadata["webSearch"], payload["webSearch"])
+        self.assertEqual(manager.metadata["discoveryWarnings"], payload["warnings"])
+        self.assertEqual(manager.assert_reservation, "reservation")
+
+    def test_discovery_api_rejects_unknown_search_provider(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "webapp" / "backend"))
+        import server
+
+        class FakeManager:
+            called = False
+
+            def submit_profile(self, *_args, **_kwargs):
+                self.called = True
+                return "d" * 32
+
+        manager = FakeManager()
+        server._rate_limit_buckets.clear()
+        with patch.object(server, "_CAMPUS_BUILD_MANAGER", manager), patch.dict(os.environ, {
+            "USERDATA_REVIEW_TOKEN": REVIEW_TOKEN,
+            "WEB_SEARCH_PROVIDER": "bogus-provider",
+        }):
+            response = server.app.test_client().post(
+                "/api/campus/discover", headers=REVIEW_HEADERS, json={
+                    "query": "demo campus",
+                    "includeAmap": False,
+                    "includeWeb": True,
+                    "autoSearch": True,
+                },
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("WEB_SEARCH_PROVIDER", response.get_json()["message"])
+        self.assertIn("bogus-provider", response.get_json()["message"])
+        self.assertFalse(manager.called)
+
+    def test_discovery_api_checks_capacity_before_metered_search(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "webapp" / "backend"))
+        import server
+
+        class FullManager:
+            @staticmethod
+            def reserve_capacity():
+                raise server.JobCapacityError("campus build queue is full")
+
+            @staticmethod
+            def release_capacity(_reservation):
+                raise AssertionError("no reservation was created")
+
+        class SearchMustNotRun:
+            provider = "tavily"
+            called = False
+
+            def search(self, _queries):
+                self.called = True
+                raise AssertionError("metered search must not run")
+
+        search = SearchMustNotRun()
+        server._rate_limit_buckets.clear()
+        with patch.object(server, "_CAMPUS_BUILD_MANAGER", FullManager()), \
+                patch.object(server, "WebSearchClient", return_value=search), \
+                patch.dict(os.environ, {
+                    "USERDATA_REVIEW_TOKEN": REVIEW_TOKEN,
+                    "WEB_SEARCH_PROVIDER": "tavily",
+                    "TAVILY_API_KEY": "configured-test-key",
+                }):
+            response = server.app.test_client().post(
+                "/api/campus/discover", headers=REVIEW_HEADERS, json={
+                    "query": "华东师范大学闵行校区拍照热力图",
+                    "includeAmap": False,
+                    "includeWeb": True,
+                    "autoSearch": True,
+                },
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertFalse(search.called)
 
     def test_discovery_api_reports_missing_amap_key_before_queueing(self):
         sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "webapp" / "backend"))
