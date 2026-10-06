@@ -1,4 +1,5 @@
 from collections import defaultdict, deque
+from contextlib import contextmanager
 from functools import wraps
 from time import monotonic
 
@@ -34,11 +35,13 @@ if _PROJECT_ROOT not in sys.path:
 
 from tools.campus_generator.harvest import (AmapPoiHarvester, HarvestCache,
                                              JsonHarvester, PublicWebHarvester)
-from tools.campus_generator.jobs import BuildJobManager
+from tools.campus_generator.jobs import (BuildJobManager, JobCapacityError,
+                                         JobNotReadyError)
 from tools.campus_generator.discovery import (CampusProfileResolver,
                                                 DiscoveryOrchestrator)
 from tools.campus_generator.review import apply_review, load_review
-from tools.campus_generator.publish import build_publish_plan, publish as _publish_campus_build
+from tools.campus_generator.publish import (build_publish_plan, formal_assets_guard,
+                                             publish as _publish_campus_build)
 
 _BASE = os.path.dirname(__file__)
 load_dotenv(os.path.join(_BASE, '../../.env'))
@@ -48,7 +51,12 @@ _CAMPUS_BUILD_ROOT = Path(_BASE) / 'userdata' / 'campus_builds'
 _CAMPUS_BUILD_MANAGER = None
 
 app = Flask(__name__)
-_CAMPUS_BUILD_MANAGER = BuildJobManager(_CAMPUS_BUILD_ROOT)
+_CAMPUS_BUILD_MANAGER = BuildJobManager(
+    _CAMPUS_BUILD_ROOT,
+    max_workers=int(os.getenv('CAMPUS_BUILD_WORKERS', '2')),
+    max_pending_tasks=int(os.getenv('CAMPUS_BUILD_MAX_PENDING', '16')),
+    max_jobs=int(os.getenv('CAMPUS_BUILD_MAX_JOBS', '256')),
+)
 app.config.update(
     SECRET_KEY=os.getenv('FLASK_SECRET_KEY') or os.urandom(32),
     MAX_CONTENT_LENGTH=int(os.getenv('MAX_CONTENT_LENGTH', str(1024 * 1024))),
@@ -67,6 +75,32 @@ if allowed_origins:
         resources={r'/api/*': {'origins': allowed_origins}},
         supports_credentials=True,
     )
+
+
+_rate_limit_buckets = defaultdict(deque)
+_rate_limit_lock = threading.Lock()
+
+
+def rate_limit(max_requests: int, window_seconds: int = 60):
+    """Small per-process limiter for JSON endpoints."""
+    def decorate(view):
+        @wraps(view)
+        def wrapped(*args, **kwargs):
+            now = monotonic()
+            key = (request.remote_addr or 'unknown', request.endpoint)
+            with _rate_limit_lock:
+                bucket = _rate_limit_buckets[key]
+                while bucket and bucket[0] <= now - window_seconds:
+                    bucket.popleft()
+                if len(bucket) >= max_requests:
+                    return jsonify({
+                        'success': False,
+                        'message': '请求过于频繁，请稍后重试',
+                    }), 429
+                bucket.append(now)
+            return view(*args, **kwargs)
+        return wrapped
+    return decorate
 
 
 def _campus_build_profile_path(value):
@@ -112,8 +146,11 @@ def _campus_build_harvesters(payload, profile_path):
 
 
 @app.route('/api/campus/build', methods=['POST'])
+@rate_limit(6)
 def submit_campus_build():
     """Queue a candidate build; output remains pending review in userdata."""
+    if not _review_token_ok():
+        return _review_denied()
     data = request.get_json(silent=True) or {}
     try:
         profile_path = _campus_build_profile_path(data.get('profile'))
@@ -122,12 +159,15 @@ def submit_campus_build():
         if existing_config:
             existing_config = _campus_build_profile_path(existing_config)
         job_id = _CAMPUS_BUILD_MANAGER.submit(profile_path, harvesters, existing_config)
+    except JobCapacityError as exc:
+        return jsonify({'success': False, 'message': str(exc)}), 503
     except (TypeError, ValueError, OSError, json.JSONDecodeError) as exc:
         return jsonify({'success': False, 'message': str(exc)}), 400
     return jsonify({'success': True, 'jobId': job_id, 'status': 'queued'}), 202
 
 
 @app.route('/api/campus/build/<job_id>', methods=['GET'])
+@rate_limit(120)
 def get_campus_build(job_id):
     if len(job_id) != 32 or not all(char in '0123456789abcdef' for char in job_id):
         return jsonify({'success': False, 'message': 'job id is invalid'}), 400
@@ -149,11 +189,25 @@ def _campus_job_output(job_id):
     return output
 
 
+@contextmanager
+def _campus_job_operation(job_id, name):
+    """Lease one stable bundle; fallback keeps lightweight test doubles usable."""
+    operation = getattr(_CAMPUS_BUILD_MANAGER, 'operation', None)
+    if operation is None:
+        yield _campus_job_output(job_id)
+        return
+    with operation(job_id, name) as output:
+        yield output
+
+
 @app.route('/api/campus/build/<job_id>/review', methods=['GET'])
+@rate_limit(60)
 def campus_build_review(job_id):
     try:
-        output = _campus_job_output(job_id)
-        return jsonify({'success': True, 'jobId': job_id, **load_review(output)})
+        with _campus_job_operation(job_id, 'review-read') as output:
+            return jsonify({'success': True, 'jobId': job_id, **load_review(output)})
+    except JobNotReadyError as exc:
+        return jsonify({'success': False, 'message': str(exc)}), 409
     except ValueError as exc:
         return jsonify({'success': False, 'message': str(exc)}), 400
     except LookupError as exc:
@@ -161,12 +215,20 @@ def campus_build_review(job_id):
 
 
 @app.route('/api/campus/build/<job_id>/review', methods=['POST'])
+@rate_limit(30)
 def update_campus_build_review(job_id):
+    if not _review_token_ok():
+        return _review_denied()
     data = request.get_json(silent=True) or {}
     try:
-        output = _campus_job_output(job_id)
-        result = apply_review(output, data.get('decisions'))
-        return jsonify({'success': True, 'jobId': job_id, **result})
+        with _campus_job_operation(job_id, 'review-write') as output:
+            result = apply_review(output, data.get('decisions'))
+            invalidate_preview = getattr(_CAMPUS_BUILD_MANAGER, 'invalidate_preview', None)
+            if invalidate_preview is not None:
+                invalidate_preview(job_id)
+            return jsonify({'success': True, 'jobId': job_id, **result})
+    except JobNotReadyError as exc:
+        return jsonify({'success': False, 'message': str(exc)}), 409
     except (TypeError, ValueError) as exc:
         return jsonify({'success': False, 'message': str(exc)}), 400
     except LookupError as exc:
@@ -174,11 +236,17 @@ def update_campus_build_review(job_id):
 
 
 @app.route('/api/campus/build/<job_id>/preview', methods=['POST'])
+@rate_limit(10)
 def submit_campus_build_preview(job_id):
+    if not _review_token_ok():
+        return _review_denied()
     try:
-        _campus_job_output(job_id)
         _CAMPUS_BUILD_MANAGER.submit_preview(job_id)
         return jsonify({'success': True, 'jobId': job_id, 'previewStatus': 'queued'}), 202
+    except JobCapacityError as exc:
+        return jsonify({'success': False, 'message': str(exc)}), 503
+    except JobNotReadyError as exc:
+        return jsonify({'success': False, 'message': str(exc)}), 409
     except ValueError as exc:
         return jsonify({'success': False, 'message': str(exc)}), 400
     except LookupError as exc:
@@ -186,12 +254,15 @@ def submit_campus_build_preview(job_id):
 
 
 @app.route('/api/campus/build/<job_id>/publish-plan', methods=['GET'])
+@rate_limit(30)
 def get_campus_build_publish_plan(job_id):
     """Return a diff without changing formal POI assets."""
     try:
-        output = _campus_job_output(job_id)
-        return jsonify({'success': True, 'jobId': job_id,
-                        'plan': build_publish_plan(output)})
+        with _campus_job_operation(job_id, 'publish-plan') as output:
+            return jsonify({'success': True, 'jobId': job_id,
+                            'plan': build_publish_plan(output)})
+    except JobNotReadyError as exc:
+        return jsonify({'success': False, 'message': str(exc)}), 409
     except (ValueError, OSError, json.JSONDecodeError) as exc:
         return jsonify({'success': False, 'message': str(exc)}), 400
     except LookupError as exc:
@@ -199,19 +270,22 @@ def get_campus_build_publish_plan(job_id):
 
 
 @app.route('/api/campus/build/<job_id>/publish', methods=['POST'])
+@rate_limit(10)
 def publish_campus_build(job_id):
     """Publish only after the caller explicitly confirms the displayed diff."""
     if not _review_token_ok():
         return _review_denied()
     data = request.get_json(silent=True) or {}
     try:
-        output = _campus_job_output(job_id)
-        result = _publish_campus_build(
-            output,
-            confirm=data.get('confirm') is True,
-            expected_after_hash=data.get('expectedAfterHash'),
-        )
-        return jsonify({'success': True, 'jobId': job_id, **result})
+        with _campus_job_operation(job_id, 'publish') as output:
+            result = _publish_campus_build(
+                output,
+                confirm=data.get('confirm') is True,
+                expected_after_hash=data.get('expectedAfterHash'),
+            )
+            return jsonify({'success': True, 'jobId': job_id, **result})
+    except JobNotReadyError as exc:
+        return jsonify({'success': False, 'message': str(exc)}), 409
     except (TypeError, ValueError, OSError, json.JSONDecodeError) as exc:
         return jsonify({'success': False, 'message': str(exc)}), 400
     except LookupError as exc:
@@ -219,22 +293,30 @@ def publish_campus_build(job_id):
 
 
 @app.route('/api/campus/build/<job_id>/preview/<scene>', methods=['GET'])
+@rate_limit(120)
 def get_campus_build_preview(job_id, scene):
     if scene not in SCENE_IDS:
         return jsonify({'success': False, 'message': 'scene is invalid'}), 400
     try:
-        output = _campus_job_output(job_id)
-        profile = json.loads((output / 'campus_profile.json').read_text(encoding='utf-8'))
-        slug = str((profile.get('campus') or {}).get('slug') or '')
-        season = request.args.get('season', '').strip().lower()
-        if season and season not in {'spring', 'summer', 'autumn', 'winter'}:
-            return jsonify({'success': False, 'message': 'season is invalid'}), 400
-        suffix = f'_{season}' if season and scene in {'flower_viewing', 'photo'} else ''
-        cache_file = output / 'preview_heatmap_cache' / f'{slug}_{scene}{suffix}.json'
-        if not cache_file.is_file():
-            return jsonify({'success': False, 'message': 'preview is not ready for this scene'}), 404
-        payload = json.loads(cache_file.read_text(encoding='utf-8'))
-        return jsonify({'success': True, 'jobId': job_id, 'preview': payload})
+        with _campus_job_operation(job_id, 'preview-read') as output:
+            assert_preview_ready = getattr(
+                _CAMPUS_BUILD_MANAGER, 'assert_preview_ready', None,
+            )
+            if assert_preview_ready is not None:
+                assert_preview_ready(job_id)
+            profile = json.loads((output / 'campus_profile.json').read_text(encoding='utf-8'))
+            slug = str((profile.get('campus') or {}).get('slug') or '')
+            season = request.args.get('season', '').strip().lower()
+            if season and season not in {'spring', 'summer', 'autumn', 'winter'}:
+                return jsonify({'success': False, 'message': 'season is invalid'}), 400
+            suffix = f'_{season}' if season and scene in {'flower_viewing', 'photo'} else ''
+            cache_file = output / 'preview_heatmap_cache' / f'{slug}_{scene}{suffix}.json'
+            if not cache_file.is_file():
+                return jsonify({'success': False, 'message': 'preview is not ready for this scene'}), 404
+            payload = json.loads(cache_file.read_text(encoding='utf-8'))
+            return jsonify({'success': True, 'jobId': job_id, 'preview': payload})
+    except JobNotReadyError as exc:
+        return jsonify({'success': False, 'message': str(exc)}), 409
     except ValueError as exc:
         return jsonify({'success': False, 'message': str(exc)}), 400
     except (LookupError, OSError, json.JSONDecodeError) as exc:
@@ -242,8 +324,11 @@ def get_campus_build_preview(job_id, scene):
 
 
 @app.route('/api/campus/discover', methods=['POST'])
+@rate_limit(6)
 def submit_campus_discovery():
     """Resolve a natural-language campus request and queue multi-source harvest."""
+    if not _review_token_ok():
+        return _review_denied()
     data = request.get_json(silent=True) or {}
     try:
         query = data.get('query')
@@ -278,6 +363,8 @@ def submit_campus_discovery():
                       'keywords': plan.keywords, 'discoveryWarnings': plan.warnings,
                       'discovery': plan.profile.get('discovery', {})},
         )
+    except JobCapacityError as exc:
+        return jsonify({'success': False, 'message': str(exc)}), 503
     except (TypeError, ValueError, OSError, json.JSONDecodeError, RuntimeError) as exc:
         return jsonify({'success': False, 'message': str(exc)}), 400
     return jsonify({
@@ -643,7 +730,11 @@ def _load_campus_pois() -> list:
     return valid_pois
 
 
-_CAMPUS_POIS = _load_campus_pois()
+with formal_assets_guard():
+    # Recovery and both formal POI reads happen under the same lock, so startup
+    # can only expose the complete before or after state of a publication.
+    POI_DATA_FILES = _discover_poi_data_files()
+    _CAMPUS_POIS = _load_campus_pois()
 
 
 def _poi_category_config(category: str) -> dict:
@@ -3105,27 +3196,6 @@ def build_emotion_context(emotions: list) -> str:
 
 # 用线程本地存储代替全局变量，每个请求线程拥有独立连接，避免竞态条件
 _local = threading.local()
-_rate_limit_buckets = defaultdict(deque)
-_rate_limit_lock = threading.Lock()
-
-
-def rate_limit(max_requests: int, window_seconds: int = 60):
-    """Small per-process limiter for the public JSON endpoints."""
-    def decorate(view):
-        @wraps(view)
-        def wrapped(*args, **kwargs):
-            now = monotonic()
-            key = (request.remote_addr or 'unknown', request.endpoint)
-            with _rate_limit_lock:
-                bucket = _rate_limit_buckets[key]
-                while bucket and bucket[0] <= now - window_seconds:
-                    bucket.popleft()
-                if len(bucket) >= max_requests:
-                    return jsonify({'success': False, 'message': '请求过于频繁，请稍后重试'}), 429
-                bucket.append(now)
-            return view(*args, **kwargs)
-        return wrapped
-    return decorate
 
 
 @app.after_request

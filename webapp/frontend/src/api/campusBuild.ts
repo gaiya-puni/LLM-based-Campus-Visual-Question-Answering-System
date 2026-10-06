@@ -1,3 +1,5 @@
+import { getReviewToken } from './userdata';
+
 export type BuildStatus = 'queued' | 'running' | 'completed' | 'blocked' | 'failed';
 export type ReviewStatus = 'pending' | 'approved' | 'rejected';
 
@@ -12,7 +14,17 @@ export interface CandidatePoi {
   subCategory: string;
   source?: string;
   sourceUrls?: string[];
+  coordinateSystem?: 'GCJ-02' | 'WGS84' | 'BD-09';
   confidence: number;
+  quality?: {
+    scores?: Record<string, number>;
+    confidence?: number;
+    confidenceReasons?: string[];
+  };
+  // Compatibility with candidates produced during the scoring MVP rollout.
+  scores?: Record<string, number>;
+  confidenceReasons?: string[];
+  sourceConfidence?: number;
   text?: string;
   evidence?: Record<string, unknown>;
   reviewStatus: ReviewStatus;
@@ -72,6 +84,9 @@ export interface PublishPlan {
   sceneUpdated: Array<{ id: string; before: CandidatePoi; after: CandidatePoi }>;
   unchangedCount: number;
   validationProblems: string[];
+  beforeHashes: { plants: string; scenes: string };
+  afterHashes: { plants: string; scenes: string };
+  campusPolicyHash: string;
   beforeHash: string;
   afterHash: string;
   requiresRebuild: boolean;
@@ -94,7 +109,10 @@ export function submitCampusDiscovery(payload: {
 }): Promise<{ success: boolean; jobId: string; profile: ReviewBundle['profile']; theme: string; keywords: string[] }> {
   return fetch('/api/campus/discover', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Review-Token': getReviewToken(),
+    },
     body: JSON.stringify(payload),
   }).then(response => readJson(response, '/api/campus/discover'));
 }
@@ -116,7 +134,10 @@ export function submitCampusReview(jobId: string, decisions: Array<{
 }>): Promise<ReviewBundle> {
   return fetch(`/api/campus/build/${encodeURIComponent(jobId)}/review`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Review-Token': getReviewToken(),
+    },
     body: JSON.stringify({ decisions }),
   }).then(response => readJson<ReviewBundle>(response, '/api/campus/review'));
 }
@@ -124,6 +145,7 @@ export function submitCampusReview(jobId: string, decisions: Array<{
 export function submitCampusPreview(jobId: string): Promise<BuildJob> {
   return fetch(`/api/campus/build/${encodeURIComponent(jobId)}/preview`, {
     method: 'POST',
+    headers: { 'X-Review-Token': getReviewToken() },
   }).then(response => readJson<BuildJob>(response, '/api/campus/preview'));
 }
 
@@ -138,7 +160,7 @@ export function getCampusPublishPlan(jobId: string): Promise<{ success: boolean;
     .then(response => readJson<{ success: boolean; jobId: string; plan: PublishPlan }>(response, '/api/campus/publish-plan'));
 }
 
-export function publishCampusBuild(jobId: string, expectedAfterHash: string, reviewToken: string): Promise<{ success: boolean; jobId: string; published: boolean; backup?: string; message?: string }> {
+export function publishCampusBuild(jobId: string, expectedAfterHash: string, reviewToken: string): Promise<{ success: boolean; jobId: string; published: boolean; backup?: string; message?: string; reason?: string }> {
   return fetch(`/api/campus/build/${encodeURIComponent(jobId)}/publish`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Review-Token': reviewToken },

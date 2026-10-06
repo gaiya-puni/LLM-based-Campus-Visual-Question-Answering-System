@@ -17,6 +17,8 @@ from urllib.parse import urlparse
 
 import requests
 
+from .boundary import CampusMembershipEvaluator, membership_evidence
+
 
 @dataclass(frozen=True)
 class HarvestResult:
@@ -117,27 +119,36 @@ class AmapPoiHarvester:
             raise RuntimeError(f"AMap API error: {data.get('info', 'unknown error')}")
         return data
 
-    @staticmethod
-    def _distance_m(center, point) -> float:
-        lat1, lat2 = math.radians(center[1]), math.radians(point[1])
-        dlat = lat2 - lat1
-        dlng = math.radians(point[0] - center[0])
-        a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlng / 2) ** 2
-        return 6371008.8 * 2 * math.asin(math.sqrt(a))
-
     def _collect_keyword(self, keyword: str) -> tuple[list[dict], list[str]]:
         campus = self.profile["campus"]
+        if campus.get("coordinateSystem") not in (None, "GCJ-02"):
+            raise ValueError("AMap harvesting requires a GCJ-02 campus center")
         center = [float(value) for value in campus["center"]]
-        radius = min(max(int(float(campus["trustRadiusM"])), 100), 50000)
+        membership_evaluator = CampusMembershipEvaluator(campus)
+        required_radius = membership_evaluator.covering_radius_m()
+        if required_radius > 50000:
+            raise ValueError("campus boundary exceeds AMap's 50000 metre around-search limit")
+        radius = min(max(int(math.ceil(required_radius)), 100), 50000)
+        boundary = campus.get("boundary")
         params_for_cache = {"campus": campus["slug"], "center": center, "radius": radius,
                             "keyword": keyword, "pages": self.max_pages,
-                            "pageSize": self.page_size}
+                            "pageSize": self.page_size,
+                            "spatialPolicy": {
+                                "version": 2,
+                                "method": "polygon" if boundary is not None else "radius_fallback",
+                                "trustRadiusM": float(campus["trustRadiusM"]),
+                                "coordinateSystem": campus.get("coordinateSystem"),
+                                "boundaryHash": membership_evaluator.boundary_digest,
+                                "boundarySource": campus.get("boundarySource"),
+                                "boundaryConfidence": campus.get("boundaryConfidence"),
+                            }}
         cached = self.cache.get(self.source, params_for_cache) if self.cache else None
         if cached is not None:
             return cached, []
         if not self.api_key:
             raise ValueError("AMAP_WEB_SERVICE_KEY is not configured")
         results, warnings = [], []
+        excluded_outside = 0
         for page in range(1, self.max_pages + 1):
             params = {
                 "key": self.api_key,
@@ -158,8 +169,9 @@ class AmapPoiHarvester:
                 try:
                     lng_text, lat_text = str(poi.get("location", "")).split(",", 1)
                     lng, lat = float(lng_text), float(lat_text)
-                    distance = self._distance_m(center, (lng, lat))
-                    if not math.isfinite(distance) or distance > radius:
+                    accepted, distance, membership = membership_evaluator.evaluate((lng, lat))
+                    if not math.isfinite(distance) or not accepted:
+                        excluded_outside += 1
                         continue
                     name = str(poi.get("name") or "").strip()
                     if not name:
@@ -181,11 +193,13 @@ class AmapPoiHarvester:
                         "source": self.source,
                         "sourceUrls": [],
                         "sourceId": provider_id,
+                        "coordinateSystem": "GCJ-02",
                         "confidence": 0.72,
                         "verified": False,
                         "evidence": {"provider": "Amap", "type": poi_type,
-                                     "address": address, "distanceMeters": round(distance),
-                                     "keyword": keyword},
+                                     "address": address,
+                                     "keyword": keyword, "queryRadiusMeters": radius,
+                                     **membership_evidence(membership, distance)},
                         "meta": {"address": address, "amapType": poi_type,
                                  "amapId": provider_id, "sourceQuery": keyword},
                     })
@@ -193,6 +207,11 @@ class AmapPoiHarvester:
                     continue
             if len(pois) < self.page_size:
                 break
+        if excluded_outside:
+            method = "polygon" if boundary is not None else "radius fallback"
+            warnings.append(
+                f"AMap keyword {keyword!r}: excluded {excluded_outside} candidates outside campus {method}"
+            )
         if self.cache:
             self.cache.put(self.source, params_for_cache, results)
         return results, warnings
@@ -325,7 +344,8 @@ class PublicWebHarvester:
     def _collect_url(self, url: str):
         if not self._custom_fetch:
             url = self._validate_url(url)
-        cached = self.cache.get(self.source, {"url": url}) if self.cache else None
+        cache_parameters = {"url": url, "schemaVersion": 2}
+        cached = self.cache.get(self.source, cache_parameters) if self.cache else None
         if cached is not None:
             return cached, []
         content = self.fetch(url)
@@ -363,6 +383,9 @@ class PublicWebHarvester:
                     }
                     if geo:
                         item["lng"], item["lat"] = geo
+                        # Schema.org GeoCoordinates use geographic WGS84
+                        # coordinates unless a publisher explicitly says otherwise.
+                        item["coordinateSystem"] = "WGS84"
                     candidates.append(item)
             except (ValueError, TypeError):
                 continue
@@ -381,7 +404,7 @@ class PublicWebHarvester:
                 "evidence": {"provider": "HTML text", "pageExcerpt": page_text[:1200]},
             })
         if self.cache:
-            self.cache.put(self.source, {"url": url}, candidates)
+            self.cache.put(self.source, cache_parameters, candidates)
         return candidates, []
 
     def collect(self) -> HarvestResult:

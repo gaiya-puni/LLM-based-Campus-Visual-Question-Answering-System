@@ -247,7 +247,10 @@ class CampusProfileResolver:
         return {
             "school": {"id": campus["school"], "name": school.get("name", campus["school"]),
                        "enName": school.get("enName", ""), "aliases": school.get("aliases", [])},
-            "campus": {key: campus[key] for key in ("name", "slug", "aliases", "center", "trustRadiusM", "waterName")
+            "campus": {key: campus[key] for key in (
+                "name", "slug", "aliases", "center", "trustRadiusM", "waterName",
+                "coordinateSystem", "boundary", "boundarySource", "boundaryConfidence",
+            )
                        if key in campus},
             "discovery": {"method": "local_config", "query": query},
         }
@@ -272,7 +275,8 @@ class CampusProfileResolver:
         return {
             "school": {"id": school_id, "name": school_name, "enName": "", "aliases": []},
             "campus": {"name": campus_name, "slug": campus_slug, "aliases": [],
-                       "center": center, "trustRadiusM": 2000, "waterName": ""},
+                       "center": center, "trustRadiusM": 2000,
+                       "coordinateSystem": "GCJ-02", "waterName": ""},
             "discovery": {"method": "amap_geocode", "query": query, "address": address},
         }
 
@@ -315,6 +319,7 @@ class CampusPlantHarvester:
                     "confidence": 1.0,
                     "verified": True,
                     "autoApprove": True,
+                    "coordinateSystem": "GCJ-02",
                     "sourceUrls": candidate.get("sourceUrls") or [],
                     "evidence": {"provider": "campus_registry", "registry": path.name},
                 })
@@ -358,6 +363,7 @@ class CampusSceneHarvester:
                     "confidence": 1.0,
                     "verified": True,
                     "autoApprove": True,
+                    "coordinateSystem": "GCJ-02",
                     "sourceUrls": candidate.get("sourceUrls") or [],
                     "evidence": {"provider": "scene_registry", "registry": path.name},
                 })

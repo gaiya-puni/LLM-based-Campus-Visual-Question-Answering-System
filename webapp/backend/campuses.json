@@ -47,6 +47,7 @@
         31.227073
       ],
       "trustRadiusM": 1300,
+      "coordinateSystem": "GCJ-02",
       "waterName": "丽娃河"
     },
     {
@@ -62,6 +63,7 @@
         31.03148
       ],
       "trustRadiusM": 2200,
+      "coordinateSystem": "GCJ-02",
       "waterName": "樱桃河"
     },
     {
@@ -78,6 +80,7 @@
         31.025626
       ],
       "trustRadiusM": 1800,
+      "coordinateSystem": "GCJ-02",
       "waterName": "思源湖"
     }
   ]

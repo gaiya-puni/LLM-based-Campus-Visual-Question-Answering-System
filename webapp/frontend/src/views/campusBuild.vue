@@ -28,6 +28,17 @@
         <el-checkbox v-model="includeWeb">采集公开网页</el-checkbox>
         <span class="source-hint">高德 POI 需要后端配置 AMAP_WEB_SERVICE_KEY；浏览器地图 Key 不能替代。</span>
       </div>
+      <div class="review-token-row">
+        <el-input
+          v-model="reviewToken"
+          type="password"
+          show-password
+          autocomplete="off"
+          placeholder="审核令牌（项目根目录 .env 的 USERDATA_REVIEW_TOKEN）"
+          @input="saveReviewToken"
+        />
+        <span>令牌仅保存在本机浏览器，用于创建、审核、预览和正式发布任务。</span>
+      </div>
       <div class="resume-row">
         <el-input v-model="jobInput" size="small" placeholder="已有任务 ID，可直接载入" />
         <el-button size="small" :disabled="!jobInput.trim()" @click="loadExisting">载入任务</el-button>
@@ -77,7 +88,7 @@
           <p>{{ item.subCategory }} · {{ item.lng.toFixed(5) }}, {{ item.lat.toFixed(5) }}</p>
           <div class="candidate-meta">
             <span>{{ sourceLabel(item.source) }}</span>
-            <span>置信度 {{ item.confidence.toFixed(2) }}</span>
+            <span>{{ qualityLabel(item) }} {{ qualityConfidence(item).toFixed(2) }}</span>
           </div>
         </article>
       </div>
@@ -113,9 +124,50 @@
               <el-form-item label="纬度"><el-input-number v-model="edit.lat" :precision="6" :step="0.0001" /></el-form-item>
             </div>
           </el-form>
+          <section class="quality-review">
+            <div class="quality-heading">
+              <strong>质量评分</strong>
+              <span>{{ hasQuality(selected) ? '总质量分' : '旧版置信度' }} {{ qualityConfidence(selected).toFixed(2) }}</span>
+            </div>
+            <template v-if="qualityScoreEntries.length || riskScoreEntries.length">
+              <div v-if="qualityScoreEntries.length" class="score-group">
+                <div v-for="score in qualityScoreEntries" :key="score.key" class="score-row">
+                  <span>{{ scoreLabel(score.key) }}</span>
+                  <el-progress
+                    :percentage="scorePercent(score.value)"
+                    :stroke-width="8"
+                    :show-text="false"
+                    :color="scoreColor(score.value, false)"
+                  />
+                  <b>{{ score.value.toFixed(2) }}</b>
+                </div>
+              </div>
+              <div v-if="riskScoreEntries.length" class="score-group risk-group">
+                <div class="score-group-title">风险（越低越好）</div>
+                <div v-for="score in riskScoreEntries" :key="score.key" class="score-row">
+                  <span>{{ scoreLabel(score.key) }}</span>
+                  <el-progress
+                    :percentage="scorePercent(score.value)"
+                    :stroke-width="8"
+                    :show-text="false"
+                    :color="scoreColor(score.value, true)"
+                  />
+                  <b>{{ score.value.toFixed(2) }}</b>
+                </div>
+              </div>
+            </template>
+            <p v-else class="legacy-quality">旧候选暂无分项评分，仅保留总置信度。</p>
+            <div class="confidence-reasons">
+              <strong>评分理由</strong>
+              <ul v-if="confidenceReasons.length">
+                <li v-for="(reason, index) in confidenceReasons" :key="index">{{ reason }}</li>
+              </ul>
+              <p v-else>暂无评分理由，请结合来源与证据人工复核。</p>
+            </div>
+          </section>
           <dl class="evidence">
             <div><dt>来源</dt><dd>{{ sourceLabel(selected.source) }}</dd></div>
-            <div><dt>置信度</dt><dd>{{ selected.confidence.toFixed(2) }}</dd></div>
+            <div v-if="sourceConfidence(selected) !== undefined"><dt>来源置信度</dt><dd>{{ sourceConfidence(selected)?.toFixed(2) }}</dd></div>
             <div><dt>证据</dt><dd>{{ evidenceText }}</dd></div>
           </dl>
           <div class="drawer-actions">
@@ -138,11 +190,13 @@ import {
   submitCampusPreview, submitCampusReview, getCampusPublishPlan, publishCampusBuild,
   type BuildJob, type CandidatePoi, type ReviewBundle, type ReviewStatus, type PublishPlan,
 } from '../api/campusBuild';
+import { getReviewToken, setReviewToken } from '../api/userdata';
 
 const query = ref('');
 const webUrlsText = ref('');
 const includeAmap = ref(true);
 const includeWeb = ref(true);
+const reviewToken = ref(getReviewToken());
 const jobInput = ref('');
 const job = ref<BuildJob | null>(null);
 const review = ref<ReviewBundle | null>(null);
@@ -174,6 +228,18 @@ const evidenceText = computed(() => {
   if (!evidence) return '暂无结构化证据';
   return Object.values(evidence).filter(Boolean).join('；');
 });
+type ScoreEntry = { key: string; value: number };
+const allScoreEntries = computed<ScoreEntry[]>(() => {
+  const candidate = selected.value;
+  if (!candidate) return [];
+  return Object.entries(candidate.quality?.scores || candidate.scores || {})
+    .filter((entry): entry is [string, number] => Number.isFinite(entry[1]))
+    .map(([key, value]) => ({ key, value }));
+});
+const confidenceReasons = computed(() => selected.value?.quality?.confidenceReasons || selected.value?.confidenceReasons || []);
+const isRiskScore = (key: string) => /risk/i.test(key);
+const qualityScoreEntries = computed(() => allScoreEntries.value.filter(entry => !isRiskScore(entry.key)));
+const riskScoreEntries = computed(() => allScoreEntries.value.filter(entry => isRiskScore(entry.key)));
 
 const scenes = [
   { id: 'walk', name: '散步休息' }, { id: 'date', name: '浪漫约会' },
@@ -195,6 +261,34 @@ const sourceLabel = (value?: string) => ({ amap: '高德 POI', amap_plant: '高�
 const reviewLabel = (value: ReviewStatus) => ({ pending: '待审', approved: '已通过', rejected: '已拒绝' }[value]);
 const statusType = (value?: string) => value === 'failed' || value === 'blocked' ? 'danger' : value === 'completed' ? 'success' : 'warning';
 const reviewTagType = (value: ReviewStatus) => value === 'approved' ? 'success' : value === 'rejected' ? 'danger' : 'warning';
+const hasQuality = (candidate: CandidatePoi) => Boolean(
+  candidate.quality || candidate.scores || candidate.confidenceReasons,
+);
+const qualityConfidence = (candidate: CandidatePoi) => {
+  const value = candidate.quality?.confidence;
+  return Number.isFinite(value) ? value as number : candidate.confidence;
+};
+const qualityLabel = (candidate: CandidatePoi) => hasQuality(candidate) ? '质量分' : '置信度';
+const sourceConfidence = (candidate: CandidatePoi) => {
+  if (Number.isFinite(candidate.sourceConfidence)) return candidate.sourceConfidence as number;
+  return candidate.quality && Number.isFinite(candidate.confidence) ? candidate.confidence : undefined;
+};
+const saveReviewToken = () => setReviewToken(reviewToken.value);
+const scoreLabel = (key: string) => ({
+  campusEvidence: '校园证据',
+  boundaryEvidence: '边界证据',
+  themeRelevance: '主题相关',
+  sourceReliability: '来源可靠性',
+  sourceConfidence: '来源置信度',
+  crossSourceAgreement: '跨来源一致性',
+  commercialRisk: '商业场所风险',
+  duplicateRisk: '重复候选风险',
+}[key] || key);
+const scorePercent = (value: number) => Math.round(Math.max(0, Math.min(1, value)) * 100);
+const scoreColor = (value: number, risk: boolean) => {
+  const strength = risk ? 1 - value : value;
+  return strength >= 0.7 ? '#67c23a' : strength >= 0.4 ? '#e6a23c' : '#f56c6c';
+};
 
 const clearMarkers = () => { markers.forEach(marker => marker.setMap(null)); markers = []; };
 const renderMarkers = () => {
@@ -256,6 +350,11 @@ const poll = async () => {
 };
 const startPolling = () => { if (timer) window.clearInterval(timer); timer = window.setInterval(poll, 1800); poll(); };
 const submit = async () => {
+  if (reviewToken.value.trim().length < 16) {
+    error.value = '请先填写至少 16 位审核令牌；它应与项目根目录 .env 中的 USERDATA_REVIEW_TOKEN 一致';
+    return;
+  }
+  saveReviewToken();
   submitting.value = true; error.value = ''; review.value = null; previewReady.value = false;
   try {
     const result = await submitCampusDiscovery({
@@ -294,6 +393,7 @@ const decide = async (action: 'approve' | 'reject' | 'pending') => {
     const updated = review.value.candidates.find(item => item.id === selected.value?.id);
     if (updated) selected.value = updated;
     previewReady.value = false;
+    job.value.previewStatus = 'stale';
     publishPlan.value = null;
     clearHeatmap();
     renderMarkers();
@@ -319,13 +419,19 @@ const showPublishPlan = async () => {
       '确认正式发布',
       { confirmButtonText: '确认发布', cancelButtonText: '取消', type: 'warning' },
     );
-    const { value: reviewToken } = await ElMessageBox.prompt(
+    const { value: confirmedToken } = await ElMessageBox.prompt(
       '请输入后端 .env 中配置的 USERDATA_REVIEW_TOKEN。令牌仅用于本次正式发布请求。',
       '发布权限验证',
-      { confirmButtonText: '验证并发布', cancelButtonText: '取消', inputType: 'password', inputPattern: /^.{16,}$/, inputErrorMessage: '审核令牌至少需要 16 位' },
+      { confirmButtonText: '验证并发布', cancelButtonText: '取消', inputType: 'password', inputValue: reviewToken.value, inputPattern: /^.{16,}$/, inputErrorMessage: '审核令牌至少需要 16 位' },
     );
-    const published = await publishCampusBuild(job.value.id, result.plan.afterHash, reviewToken);
-    ElMessage.success(published.message || '正式数据已发布');
+    reviewToken.value = confirmedToken;
+    saveReviewToken();
+    const published = await publishCampusBuild(job.value.id, result.plan.afterHash, confirmedToken);
+    if (published.published) {
+      ElMessage.success(published.message || '正式数据已发布');
+    } else {
+      ElMessage.info(published.reason || '正式数据没有待发布的变化');
+    }
   } catch (err) {
     if (err !== 'cancel' && err !== 'close') error.value = err instanceof Error ? err.message : '正式发布失败';
   } finally { publishing.value = false; }
@@ -385,12 +491,15 @@ onBeforeUnmount(() => { if (timer) window.clearInterval(timer); clearMarkers(); 
 .request-card, .job-card, .candidate-panel, .map-panel { border: 1px solid #ebeef5; border-radius: 12px; background: #fff; padding: 14px; }
 .request-options { margin-top: 10px; } .request-options .el-input { flex: 1; } .resume-row { margin-top: 10px; max-width: 420px; } .resume-row .el-input { flex: 1; }
 .source-options { display: flex; align-items: center; gap: 12px; margin-top: 9px; } .source-hint { color: #909399; font-size: 12px; }
+.review-token-row { display: grid; grid-template-columns: minmax(280px, 1fr) 1.4fr; align-items: center; gap: 12px; margin-top: 10px; } .review-token-row span { color: #909399; font-size: 12px; }
 .error { color: #f56c6c; font-size: 13px; margin-top: 8px; } .warning { color: #b88230; font-size: 12px; margin-top: 8px; }
 .job-summary { flex-wrap: wrap; color: #606266; font-size: 13px; } .job-summary div { padding-right: 16px; border-right: 1px solid #ebeef5; } .job-summary div:last-child { border-right: 0; } .job-summary span { color: #909399; margin-right: 5px; } code { color: #909399; font-size: 11px; }
 .workspace { display: grid; grid-template-columns: minmax(320px, 430px) minmax(0, 1fr); gap: 14px; min-height: 560px; } .candidate-panel { overflow: auto; max-height: 680px; } .panel-head { justify-content: space-between; align-items: flex-start; } .review-stats { margin: 14px 0 8px; }
 .candidate-item { padding: 11px 10px; margin: 8px 0; border: 1px solid #ebeef5; border-left: 4px solid #e6a23c; border-radius: 9px; cursor: pointer; transition: .15s; } .candidate-item:hover, .candidate-item.selected { background: #fff8f1; border-color: #e6a23c; } .candidate-item.approved { border-left-color: #67c23a; } .candidate-item.rejected { border-left-color: #909399; opacity: .7; } .candidate-title { display: flex; justify-content: space-between; gap: 8px; } .candidate-item p, .candidate-meta { color: #909399; font-size: 12px; margin-top: 5px; } .candidate-meta { display: flex; justify-content: space-between; }
 .map-panel { position: relative; min-height: 560px; padding: 0; overflow: hidden; } .map { width: 100%; height: 100%; min-height: 560px; } .map-toolbar { position: absolute; z-index: 3; left: 12px; top: 12px; padding: 8px; border-radius: 9px; background: rgba(255,255,255,.95); box-shadow: 0 3px 12px #0002; } .map-hint { position: absolute; left: 12px; bottom: 12px; padding: 7px 10px; background: rgba(255,255,255,.92); color: #909399; font-size: 12px; border-radius: 7px; }
 .preview-success { color: #529b2e; } .publish-hint { position: absolute; left: 12px; bottom: 44px; padding: 7px 10px; background: rgba(255,248,230,.95); color: #b88230; font-size: 12px; border-radius: 7px; }
-.empty { padding: 40px 10px; text-align: center; color: #909399; font-size: 13px; } .coord-fields { display: flex; gap: 10px; } .coord-fields .el-form-item { flex: 1; } .evidence { border-top: 1px solid #ebeef5; padding-top: 12px; } .evidence div { margin: 8px 0; } .evidence dt { color: #909399; font-size: 12px; } .evidence dd { margin: 3px 0; color: #606266; font-size: 13px; line-height: 1.5; word-break: break-word; } .drawer-actions { justify-content: flex-end; margin-top: 22px; }
-@media (max-width: 900px) { .workspace { grid-template-columns: 1fr; } .map-panel { min-height: 430px; } .map { min-height: 430px; } .request-options { align-items: stretch; flex-direction: column; } }
+.empty { padding: 40px 10px; text-align: center; color: #909399; font-size: 13px; } .coord-fields { display: flex; gap: 10px; } .coord-fields .el-form-item { flex: 1; }
+.quality-review { margin-top: 2px; padding: 12px; border: 1px solid #ebeef5; border-radius: 9px; background: #fafafa; } .quality-heading { display: flex; align-items: center; justify-content: space-between; color: #303133; font-size: 13px; } .quality-heading span { color: #606266; font-variant-numeric: tabular-nums; } .score-group { margin-top: 10px; } .score-group-title { margin-bottom: 7px; color: #909399; font-size: 12px; } .risk-group { padding-top: 9px; border-top: 1px dashed #dcdfe6; } .score-row { display: grid; grid-template-columns: 94px minmax(80px, 1fr) 32px; align-items: center; gap: 8px; margin: 7px 0; color: #606266; font-size: 12px; } .score-row b { text-align: right; color: #606266; font-size: 12px; font-variant-numeric: tabular-nums; } .legacy-quality { margin-top: 9px; color: #909399; font-size: 12px; } .confidence-reasons { margin-top: 12px; padding-top: 10px; border-top: 1px dashed #dcdfe6; color: #606266; font-size: 12px; } .confidence-reasons ul { margin: 7px 0 0; padding-left: 18px; } .confidence-reasons li { margin: 4px 0; line-height: 1.45; } .confidence-reasons p { margin-top: 7px; color: #909399; line-height: 1.45; }
+.evidence { border-top: 1px solid #ebeef5; padding-top: 12px; } .evidence div { margin: 8px 0; } .evidence dt { color: #909399; font-size: 12px; } .evidence dd { margin: 3px 0; color: #606266; font-size: 13px; line-height: 1.5; word-break: break-word; } .drawer-actions { justify-content: flex-end; margin-top: 22px; }
+@media (max-width: 900px) { .workspace { grid-template-columns: 1fr; } .map-panel { min-height: 430px; } .map { min-height: 430px; } .request-options { align-items: stretch; flex-direction: column; } .review-token-row { grid-template-columns: 1fr; } }
 </style>

@@ -7,8 +7,9 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .boundary import CampusMembershipEvaluator
+from .formal_asset_io import atomic_write_json
 from .normalize import normalize_candidate
-from .profile import write_json
 from .validate import validate_pois
 
 
@@ -32,7 +33,7 @@ def _read(path: Path, default):
 
 
 def _write(path: Path, value) -> None:
-    write_json(path, value)
+    atomic_write_json(path, value)
 
 
 def load_review(output: str | Path) -> dict:
@@ -73,10 +74,13 @@ def apply_review(output: str | Path, decisions: list[dict]) -> dict:
     """
     root = Path(output)
     profile = _read(root / "campus_profile.json", {})
+    report = _read(root / "build_report.json", {})
+    theme = str(report.get("theme") or "").strip() if isinstance(report, dict) else ""
     campus = (profile.get("campus") or {}).get("name")
     normalized = _read(root / "normalized_pois.json", [])
     if not campus or not isinstance(normalized, list):
         raise ValueError("build output does not contain a valid candidate bundle")
+    membership_evaluator = CampusMembershipEvaluator(profile["campus"])
     by_id = {str(item.get("id")): copy.deepcopy(item) for item in normalized if isinstance(item, dict)}
     previous = _read(root / "review_state.json", {})
     status = dict(previous.get("decisions") or {}) if isinstance(previous, dict) else {}
@@ -111,11 +115,19 @@ def apply_review(output: str | Path, decisions: list[dict]) -> dict:
             candidate.update(patch)
         if action == "approve":
             try:
-                approved = normalize_candidate(candidate, campus, index)
-                approved["verified"] = True
+                candidate["verified"] = True
+                approved = normalize_candidate(
+                    candidate, campus, index,
+                    membership_evaluator=membership_evaluator,
+                    theme=theme or None,
+                )
                 approved["reviewStatus"] = "approved"
                 approved["reviewedAt"] = _now()
                 approved_by_id[approved["id"]] = approved
+                normalized_candidate = copy.deepcopy(approved)
+                normalized_candidate.pop("reviewStatus", None)
+                normalized_candidate.pop("reviewedAt", None)
+                by_id[candidate_id] = normalized_candidate
                 status[candidate_id] = "approved"
             except (TypeError, ValueError) as exc:
                 errors.append(f"decision[{index}] cannot be approved: {exc}")
@@ -128,7 +140,15 @@ def apply_review(output: str | Path, decisions: list[dict]) -> dict:
     if errors:
         raise ValueError("; ".join(errors))
     approved = list(approved_by_id.values())
-    problems = validate_pois(approved, campus)
+    problems = validate_pois(approved, campus, campus_profile=profile["campus"])
+    if problems:
+        raise ValueError("approved candidates failed validation: " + "; ".join(problems))
+    updated_normalized = [
+        copy.deepcopy(by_id.get(str(item.get("id")), item))
+        if isinstance(item, dict) else copy.deepcopy(item)
+        for item in normalized
+    ]
+    _write(root / "normalized_pois.json", updated_normalized)
     _write(root / "approved_pois.json", approved)
     _write(root / "review_state.json", {"updatedAt": _now(), "decisions": status,
                                          "approvedCount": len(approved),

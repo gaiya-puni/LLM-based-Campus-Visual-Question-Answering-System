@@ -56,6 +56,7 @@ def cmd_profile(args) -> int:
             "aliases": [],
             "center": [args.lng, args.lat],
             "trustRadiusM": args.trust_radius,
+            "coordinateSystem": args.coordinate_system,
             "waterName": "",
         },
     }
@@ -73,8 +74,12 @@ def cmd_validate(args) -> int:
     problems = validate_runtime_config(runtime_config(profile, existing))
     if args.candidates:
         candidates = _read_candidates(Path(args.candidates))
-        normalized, pending = normalize_candidates(candidates, profile["campus"]["name"])
-        problems.extend(validate_pois(normalized, profile["campus"]["name"]))
+        normalized, pending = normalize_candidates(
+            candidates, profile["campus"]["name"], campus_profile=profile["campus"],
+        )
+        problems.extend(validate_pois(
+            normalized, profile["campus"]["name"], campus_profile=profile["campus"],
+        ))
         print(f"normalized={len(normalized)} pending={len(pending)}")
     if problems:
         print("\n".join(problems), file=sys.stderr)
@@ -86,7 +91,9 @@ def cmd_validate(args) -> int:
 def cmd_normalize(args) -> int:
     profile = load_profile(args.profile)
     candidates = _read_candidates(Path(args.candidates))
-    normalized, pending = normalize_candidates(candidates, profile["campus"]["name"])
+    normalized, pending = normalize_candidates(
+        candidates, profile["campus"]["name"], campus_profile=profile["campus"],
+    )
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
     write_json(output / "normalized_pois.json", normalized)
@@ -135,7 +142,9 @@ def cmd_harvest_web(args) -> int:
 def cmd_build(args) -> int:
     profile, existing = _profile_and_existing(args)
     candidates = _read_candidates(Path(args.candidates))
-    normalized, pending = normalize_candidates(candidates, profile["campus"]["name"])
+    normalized, pending = normalize_candidates(
+        candidates, profile["campus"]["name"], campus_profile=profile["campus"],
+    )
     runtime = runtime_config(profile, existing)
     problems = validate_bundle(profile, runtime, normalized)
     output = Path(args.output)
@@ -185,6 +194,8 @@ def build_parser() -> argparse.ArgumentParser:
     profile.add_argument("--lng", type=float, required=True)
     profile.add_argument("--lat", type=float, required=True)
     profile.add_argument("--trust-radius", type=float, default=2000)
+    profile.add_argument("--coordinate-system", choices=("GCJ-02", "WGS84", "BD-09"),
+                         default="GCJ-02")
     profile.add_argument("--output", type=Path, required=True)
     profile.set_defaults(func=cmd_profile)
 

@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import math
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
+from .boundary import covering_radius_m
 from .profile import write_json
+from .validate import validate_pois
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -28,19 +31,25 @@ def _copy_common_sources(workspace: Path) -> None:
 
 def _write_preview_pois(workspace: Path, profile: dict, approved: list[dict]) -> Path:
     campus = profile["campus"]
+    if campus.get("coordinateSystem") not in (None, "GCJ-02"):
+        raise ValueError(
+            "heatmap preview requires GCJ-02 coordinates; convert candidates explicitly first"
+        )
     config = _read(BACKEND / "heatmap_config.json")
     campus_name = campus["name"]
     existing = config.get("campuses", {}).get(campus_name)
-    if not existing:
-        config.setdefault("campuses", {})[campus_name] = {
-            "slug": campus["slug"],
-            "center": campus["center"],
-            "auditRadiusMeters": campus["trustRadiusM"],
-        }
-    else:
-        config["campuses"][campus_name] = dict(existing, slug=campus["slug"],
-                                                center=campus["center"],
-                                                auditRadiusMeters=campus["trustRadiusM"])
+    preview_campus = dict(existing or {})
+    preview_campus.update({
+        "slug": campus["slug"],
+        "center": campus["center"],
+        # The heatmap builder still audits with a circle.  Cover the complete
+        # trusted polygon so a valid point in an elongated campus is not lost.
+        "auditRadiusMeters": math.ceil(covering_radius_m(campus)),
+    })
+    for key in ("coordinateSystem", "boundary", "boundarySource", "boundaryConfidence"):
+        if key in campus:
+            preview_campus[key] = campus[key]
+    config.setdefault("campuses", {})[campus_name] = preview_campus
     write_json(workspace / "heatmap_config.json", config)
     prepared = []
     for item in approved:
@@ -63,6 +72,16 @@ def build_preview(output: str | Path) -> dict:
                 item.get("category") in {"plant", "scene"}]
     if len(approved) < 3:
         raise ValueError("at least 3 approved POIs are required for a heatmap preview")
+    campus = profile.get("campus") or {}
+    if campus.get("coordinateSystem") not in (None, "GCJ-02"):
+        raise ValueError(
+            "heatmap preview requires GCJ-02 coordinates; convert candidates explicitly first"
+        )
+    problems = validate_pois(
+        approved, campus.get("name"), campus_profile=campus,
+    )
+    if problems:
+        raise ValueError("preview candidates failed validation: " + "; ".join(problems))
     workspace = root / "preview_workspace"
     cache = root / "preview_heatmap_cache"
     workspace.mkdir(parents=True, exist_ok=True)

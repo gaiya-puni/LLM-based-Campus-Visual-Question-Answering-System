@@ -8,6 +8,8 @@ import math
 import re
 from pathlib import Path
 
+from .boundary import validate_campus_boundary
+
 
 SLUG_RE = re.compile(r"^[a-z0-9]+(?:[_-][a-z0-9]+)*$")
 
@@ -68,6 +70,7 @@ def validate_profile(profile: dict) -> list[str]:
             raise ValueError
     except (TypeError, ValueError):
         problems.append("campus.trustRadiusM must be a positive number")
+    problems.extend(validate_campus_boundary(campus))
     return problems
 
 
