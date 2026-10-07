@@ -29,8 +29,13 @@ const isFullScreen = computed(() => route.meta.fullScreen === true);
 #building{
 background:url("../src/assets/background.jpg");
 width:100%;
-height:100%;
+height:100vh;
+height:100dvh;
 position:fixed;
+inset:0;
+overflow-x:hidden;
+overflow-y:auto;
+scrollbar-gutter:stable;
 background-size:100% 100%;
 }
 </style>
