@@ -27,6 +27,44 @@ _ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_CAMPUSES = _ROOT / "webapp" / "backend" / "campuses.json"
 
 
+# AMap and public pages normally use the official school name without a city
+# prefix.  Keep this alias table intentionally small and explicit instead of
+# applying a generic "remove city" rule, which would corrupt official names
+# such as Shanghai Jiao Tong University (上海交通大学).
+_SCHOOL_NAME_ALIASES = {
+    "上海市同济大学": "同济大学",
+    "上海同济大学": "同济大学",
+    "上海市复旦大学": "复旦大学",
+    "上海复旦大学": "复旦大学",
+}
+
+_SCHOOL_ALIASES_BY_OFFICIAL = {
+    official: sorted(
+        (alias for alias, target in _SCHOOL_NAME_ALIASES.items() if target == official),
+        key=len,
+        reverse=True,
+    )
+    for official in set(_SCHOOL_NAME_ALIASES.values())
+}
+
+# These labels are not stable campus identities.  Registered aliases (for
+# example SJTU's "闵行本部") are still resolved by _known() before this check.
+_AMBIGUOUS_CAMPUS_LABELS = frozenset({"本部", "本部校区", "主校区"})
+
+# This mapping is deliberately scoped by official school name.  "本部" is not
+# a universal campus identifier; the maintained Fudan rule resolves it to the
+# Handan campus for this workflow.  Other schools must still provide a concrete
+# campus unless their local registry contains an explicit alias.
+_SCHOOL_CAMPUS_LABELS = {
+    ("复旦大学", "本部"): "邯郸校区",
+    ("复旦大学", "本部校区"): "邯郸校区",
+}
+
+_UNIVERSITY_NAME_RE = re.compile(r"[\u4e00-\u9fffA-Za-z·]{2,32}?大学")
+_COLLEGE_NAME_RE = re.compile(r"[\u4e00-\u9fffA-Za-z·]{2,32}?学院")
+_CAMPUS_NAME_RE = re.compile(r"[\u4e00-\u9fffA-Za-z0-9·-]{1,24}?校区")
+
+
 @dataclass(frozen=True)
 class DiscoveryPlan:
     query: str
@@ -146,9 +184,12 @@ def _has_campus_evidence(item: dict, profile: dict) -> bool:
 
 def _scoped_keyword(profile: dict, keyword: str) -> str:
     school_info = profile.get("school") or {}
-    school = str(school_info.get("name") or "").strip()
+    # Profiles discovered from natural language should already contain clean
+    # identity fields.  Sanitising once more here prevents prompt verbs from
+    # leaking into provider queries when an older persisted profile is reused.
+    school = _clean_request(str(school_info.get("name") or ""))
     campus = profile.get("campus") or {}
-    campus_name = str(campus.get("name") or "").strip()
+    campus_name = _clean_request(str(campus.get("name") or ""))
     # Internal names may include a school abbreviation (for example
     # "交大闵行").  High-quality AMap results use the official phrase
     # "上海交通大学 闵行校区", so remove that prefix before
@@ -246,10 +287,71 @@ def _finite_location(value):
 
 
 def _clean_request(query: str) -> str:
-    text = re.sub(r"(帮我|请|想要|做一个|生成一个|制作一个|的)?\s*热力图", "", query)
+    text = str(query or "").strip()
+    # Intent words are usually prefixes, so remove them only at the beginning
+    # rather than deleting the same characters from a legitimate place name.
+    for pattern in (
+        r"^(?:请问|请|麻烦)\s*",
+        r"^(?:(?:帮|替|给|为)我|我(?:想要|需要|想|要))\s*",
+        r"^(?:做|生成|生产|制作|创建|绘制|构建)\s*(?:一(?:个|份|张)|一下)?\s*",
+    ):
+        # A request can contain more than one polite/intent prefix, for example
+        # "请帮我生成一个……".  Repeat until this prefix no longer matches.
+        while True:
+            updated = re.sub(pattern, "", text, count=1)
+            if updated == text:
+                break
+            text = updated.lstrip()
+    text = re.sub(r"(?:的)?(?:校园)?(?:热力图|热度图)(?:页面|数据|项目)?", "", text)
     text = re.sub(r"(校园|校内)?(地点|景点|场所)(推荐|分布)?", "", text)
     text = re.sub(r"(约会|情侣|浪漫|散步|遛弯|走走|休息|放松|拍照|摄影|出片|赏花|学习|自习|安静|吃饭|美食|餐厅|食堂)", "", text)
-    return re.sub(r"\s+", " ", text).strip(" ，,。")
+    text = re.sub(r"^(?:关于|针对|位于|在)\s*", "", text)
+    text = re.sub(r"(?:相关|主题|推荐)?\s*(?:可以吗|行吗|吗|呢)?$", "", text)
+    text = re.sub(r"\s+", " ", text).strip(" 的，,。；;：:？?!！")
+    for alias in sorted(_SCHOOL_NAME_ALIASES, key=len, reverse=True):
+        text = text.replace(alias, _SCHOOL_NAME_ALIASES[alias])
+    return text
+
+
+def _school_match(value: str):
+    """Return a complete institution match, preferring the longer 大学 form."""
+    return _UNIVERSITY_NAME_RE.search(value) or _COLLEGE_NAME_RE.search(value)
+
+
+def _request_identity(value: str) -> tuple[str, str]:
+    """Extract an official school name and a stable campus display name.
+
+    A school-only request deliberately uses the school name as the broad campus
+    scope.  That produces queries such as "复旦大学 图书馆" without inventing a
+    fake "复旦大学校区".  Ambiguous labels must be made explicit by the caller.
+    """
+    normalized = _clean_request(value)
+    if not normalized:
+        raise ValueError("校园名称不能为空，请填写完整学校名称和校区名称")
+
+    match = _school_match(normalized)
+    if match:
+        school_name = _SCHOOL_NAME_ALIASES.get(match.group(0), match.group(0))
+        remainder = normalized[match.end():].strip(" 的，,。；;：:")
+        campus_match = _CAMPUS_NAME_RE.search(remainder)
+        campus_name = campus_match.group(0) if campus_match else ""
+        ambiguous_label = campus_name or remainder
+        mapped_campus = _SCHOOL_CAMPUS_LABELS.get((school_name, ambiguous_label))
+        if mapped_campus:
+            return school_name, mapped_campus
+        if ambiguous_label in _AMBIGUOUS_CAMPUS_LABELS:
+            raise ValueError(
+                f"“{ambiguous_label}”无法唯一确定校区，请填写具体校区名称"
+                "（例如“四平路校区”或“邯郸校区”）"
+            )
+        return school_name, campus_name or school_name
+
+    # Preserve support for institutions whose short query does not contain a
+    # suffix.  The geocoder can still resolve their centre, but no 校区 suffix
+    # is silently fabricated.
+    if normalized in _AMBIGUOUS_CAMPUS_LABELS:
+        raise ValueError("校区名称过于模糊，请填写完整学校名称和具体校区名称")
+    return normalized, normalized
 
 
 class CampusProfileResolver:
@@ -264,14 +366,69 @@ class CampusProfileResolver:
     def _config(self) -> dict:
         return json.loads(self.config_path.read_text(encoding="utf-8"))
 
+    def _registered_school_alias(self, value: str) -> tuple[str, str, int] | None:
+        """Return one unambiguous registered school name, matched term and offset."""
+
+        folded = value.casefold()
+        matches = []
+        for school_id, school in (self._config().get("schools") or {}).items():
+            terms = [school.get("name"), school.get("enName"), *(school.get("aliases") or [])]
+            for term in terms:
+                text = str(term or "").strip()
+                offset = folded.find(text.casefold()) if text else -1
+                if offset >= 0:
+                    matches.append((len(text), school_id, str(school.get("name") or text), text, offset))
+        if not matches:
+            return None
+        longest = max(item[0] for item in matches)
+        strongest = [item for item in matches if item[0] == longest]
+        if len({item[1] for item in strongest}) != 1:
+            return None
+        _, _, official_name, term, offset = strongest[0]
+        return official_name, term, offset
+
+    def _request_identity(self, query: str) -> tuple[str, str, str]:
+        """Parse identity after expanding a registered abbreviation if needed."""
+
+        normalized = _clean_request(query)
+        if not _school_match(normalized):
+            matched = self._registered_school_alias(normalized)
+            if matched:
+                official_name, term, offset = matched
+                normalized = (
+                    normalized[:offset] + official_name + normalized[offset + len(term):]
+                )
+        school_name, campus_name = _request_identity(normalized)
+        return school_name, campus_name, normalized
+
 
     def _request_json(self, params: dict) -> dict:
-        response = requests.get("https://restapi.amap.com/v3/geocode/geo",
-                                params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        if data.get("status") != "1":
-            raise RuntimeError(data.get("info", "AMap geocode failed"))
+        try:
+            response = requests.get(
+                "https://restapi.amap.com/v3/geocode/geo",
+                params=params,
+                timeout=10,
+            )
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            detail = status if status is not None else "unknown"
+            # Do not propagate requests' exception text: it commonly embeds
+            # the complete request URL, including the Web service key.
+            raise RuntimeError(f"AMap geocoding request failed (HTTP {detail})") from None
+        except requests.RequestException:
+            raise RuntimeError("AMap geocoding request failed (network error)") from None
+        try:
+            data = response.json()
+        except (TypeError, ValueError):
+            raise RuntimeError("AMap geocoding returned invalid JSON") from None
+        if not isinstance(data, dict):
+            raise RuntimeError("AMap geocoding returned an invalid response")
+        if str(data.get("status", "")) != "1":
+            infocode = str(data.get("infocode") or "unknown")
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", infocode):
+                infocode = "unknown"
+            raise RuntimeError(f"AMap geocoding failed (infocode={infocode})")
         return data
 
     def _known(self, query: str) -> dict | None:
@@ -286,6 +443,23 @@ class CampusProfileResolver:
                             *(school.get("aliases") or [])]
             school_score = sum(len(str(term)) for term in school_terms
                                if term and str(term).lower() in text)
+            if school_score:
+                # Once the school is unambiguous, campus aliases may safely
+                # drop that school's own prefix.  For example, the registered
+                # alias "交大闵行校区" should match
+                # "上海交通大学闵行校区", while the same bare "闵行校区"
+                # must not globally select ECNU or SJTU before school scoping.
+                scoped_terms = list(campus_terms)
+                for term in campus_terms:
+                    term_text = str(term or "")
+                    for prefix in school_terms:
+                        prefix_text = str(prefix or "")
+                        if (prefix_text and
+                                term_text.casefold().startswith(prefix_text.casefold())):
+                            suffix = term_text[len(prefix_text):]
+                            if suffix:
+                                scoped_terms.append(suffix)
+                campus_terms = list(dict.fromkeys(scoped_terms))
             campus_score = sum(len(str(term)) for term in campus_terms
                                if term and str(term).lower() in text)
             if school_score or campus_score:
@@ -295,7 +469,35 @@ class CampusProfileResolver:
                 matches.append((school_score, campus_score, campus, school))
         if not matches:
             return None
-        _, _, campus, school = max(matches, key=lambda item: (item[0], item[1]))
+        top_school_score = max(item[0] for item in matches)
+        if top_school_score:
+            school_matches = [item for item in matches if item[0] == top_school_score]
+            top_campus_score = max(item[1] for item in school_matches)
+            if not top_campus_score:
+                # Validate an unregistered campus label even for a school
+                # that currently has only one configured campus.  An explicit
+                # school-scoped alias still has a campus score and is allowed.
+                requested_school, requested_campus, _ = self._request_identity(query)
+                if requested_campus != requested_school:
+                    # The school is known, but the requested campus is not.
+                    # Let geocoding resolve it instead of silently selecting
+                    # the school's only registered campus.
+                    return None
+                if len(school_matches) > 1:
+                    # Never pick the first campus merely because dictionary
+                    # order is stable; geocoding provides a broad school scope.
+                    return None
+            candidates = (
+                [item for item in school_matches if item[1] == top_campus_score]
+                if top_campus_score else school_matches
+            )
+        else:
+            # A bare "本部/主校区" must not match a generic registry alias
+            # without any school context.
+            _request_identity(query)
+            top_campus_score = max(item[1] for item in matches)
+            candidates = [item for item in matches if item[1] == top_campus_score]
+        _, _, campus, school = max(candidates, key=lambda item: (item[0], item[1]))
         return {
             "school": {"id": campus["school"], "name": school.get("name", campus["school"]),
                        "enName": school.get("enName", ""), "aliases": school.get("aliases", [])},
@@ -304,13 +506,26 @@ class CampusProfileResolver:
                 "coordinateSystem", "boundary", "boundarySource", "boundaryConfidence",
             )
                        if key in campus},
-            "discovery": {"method": "local_config", "query": query},
+            "discovery": {
+                "method": "local_config",
+                "query": query,
+                "resolvedSchool": school.get("name", campus["school"]),
+                "resolvedCampus": campus.get("name", ""),
+            },
         }
 
     def _geocode(self, query: str) -> dict:
+        school_name, campus_name, normalized_query = self._request_identity(query)
         if not self.api_key:
             raise ValueError("unknown campus; AMAP_WEB_SERVICE_KEY is required for geocoding")
-        payload = self.request_json({"key": self.api_key, "address": _clean_request(query), "output": "json"})
+        geocode_address = (
+            school_name if campus_name == school_name else f"{school_name}{campus_name}"
+        )
+        payload = self.request_json({
+            "key": self.api_key,
+            "address": geocode_address,
+            "output": "json",
+        })
         geocodes = payload.get("geocodes") or []
         if not geocodes:
             raise ValueError("could not resolve a campus center from the request")
@@ -318,18 +533,22 @@ class CampusProfileResolver:
         center = _finite_location(item.get("location"))
         if not center:
             raise ValueError("geocoding result has no valid coordinates")
-        address = str(item.get("formatted_address") or _clean_request(query))
-        name = _clean_request(query) or address
-        school_name = re.split(r"(校区|大学|学院)", name, maxsplit=1)[0] or name
-        campus_name = name if "校区" in name else f"{name}校区"
+        address = str(item.get("formatted_address") or normalized_query)
         school_id = _slug(school_name, "school")
         campus_slug = _slug(campus_name, "campus")
+        aliases = list(_SCHOOL_ALIASES_BY_OFFICIAL.get(school_name, []))
         return {
-            "school": {"id": school_id, "name": school_name, "enName": "", "aliases": []},
+            "school": {"id": school_id, "name": school_name, "enName": "", "aliases": aliases},
             "campus": {"name": campus_name, "slug": campus_slug, "aliases": [],
                        "center": center, "trustRadiusM": 2000,
                        "coordinateSystem": "GCJ-02", "waterName": ""},
-            "discovery": {"method": "amap_geocode", "query": query, "address": address},
+            "discovery": {
+                "method": "amap_geocode",
+                "query": query,
+                "address": address,
+                "resolvedSchool": school_name,
+                "resolvedCampus": campus_name,
+            },
         }
 
     def resolve(self, query: str) -> dict:

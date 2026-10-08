@@ -44,7 +44,7 @@
         <el-input v-model="jobInput" size="small" placeholder="已有任务 ID，可直接载入" />
         <el-button size="small" :disabled="!jobInput.trim()" @click="loadExisting">载入任务</el-button>
       </div>
-      <p v-if="error" class="error">{{ error }}</p>
+      <p v-if="error" class="error">{{ safeError }}</p>
     </section>
 
     <section v-if="job" class="job-card">
@@ -59,8 +59,31 @@
         </div>
       </div>
       <el-progress v-if="job.status === 'queued' || job.status === 'running'" :percentage="progress" :indeterminate="job.status === 'running'" />
-      <p v-if="job.error" class="error">任务失败：{{ job.error }}</p>
-      <p v-if="job.discoveryWarnings?.length" class="warning">{{ job.discoveryWarnings.join('；') }}</p>
+      <p v-if="job.error" class="error">任务失败：{{ redactDiagnostic(job.error) }}</p>
+      <div v-if="hasDiscoveryDetails" class="discovery-details" aria-label="校区解析结果">
+        <strong>解析结果</strong>
+        <dl>
+          <div><dt>学校</dt><dd>{{ resolvedDiscovery.school || '未返回' }}</dd></div>
+          <div><dt>校区</dt><dd>{{ resolvedDiscovery.campus || '未返回' }}</dd></div>
+          <div><dt>方式</dt><dd>{{ discoveryMethodLabel(resolvedDiscovery.method) }}</dd></div>
+          <div v-if="resolvedDiscovery.address"><dt>地址</dt><dd>{{ resolvedDiscovery.address }}</dd></div>
+        </dl>
+      </div>
+      <div v-if="diagnosticWarnings.length" class="warning-list" role="status">
+        <strong>任务提示</strong>
+        <ul>
+          <li v-for="(warning, index) in diagnosticWarnings" :key="`${index}-${warning}`">{{ warning }}</li>
+        </ul>
+      </div>
+      <div v-if="showZeroCandidateHelp" class="zero-candidate-help" role="alert">
+        <strong>未发现可用地点</strong>
+        <p>请先核对上方解析出的学校和校区是否正确，再按以下方式重试：</p>
+        <ul>
+          <li>输入准确的学校与校区名称，例如“同济大学四平路校区拍照热力图”。</li>
+          <li>保持“搜索高德 POI”开启，并确认后端已配置高德 Web 服务 Key；若提示请求限流，请稍后重试。</li>
+          <li>网页搜索只能提供地点线索，最终地点仍需可解析的名称与坐标；也可补充学校官网的地点介绍页。</li>
+        </ul>
+      </div>
       <details v-if="job.webSearch?.results.length" class="search-results">
         <summary>查看自动发现的网页（{{ job.webSearch.results.length }}）</summary>
         <ol>
@@ -230,6 +253,31 @@ const mapEl = ref<HTMLElement | null>(null);
 const edit = reactive({ name: '', locationName: '', lng: 0, lat: 0 });
 const progress = computed(() => job.value?.status === 'queued' ? 12 : 62);
 const pendingItems = computed(() => review.value?.candidates.filter(item => item.reviewStatus === 'pending') || []);
+const resolvedDiscovery = computed(() => {
+  const discovery = job.value?.discovery;
+  return {
+    school: discovery?.resolvedSchool || review.value?.profile?.school?.name || review.value?.school || '',
+    campus: discovery?.resolvedCampus || review.value?.profile?.campus?.name || review.value?.campus || '',
+    method: discovery?.method || review.value?.profile?.discovery?.method || '',
+    address: discovery?.address || review.value?.profile?.discovery?.address || '',
+  };
+});
+const hasDiscoveryDetails = computed(() => Object.values(resolvedDiscovery.value).some(Boolean));
+const redactDiagnostic = (value: unknown) => String(value || '')
+  .replace(/([?&](?:key|token|api_key|access_token)=)[^&\s]+/gi, '$1[凭证已隐藏]')
+  .replace(/((?:api[_ -]?key|access[_ -]?token|authorization)\s*[:=]\s*["']?)[^\s"',;&]+/gi, '$1[凭证已隐藏]')
+  .replace(/(bearer\s+)[a-z0-9._~+\/-]+=*/gi, '$1[凭证已隐藏]')
+  .replace(/\b(?:tvly|sk)-[a-z0-9_-]{12,}\b/gi, '[凭证已隐藏]')
+  .trim();
+const safeError = computed(() => redactDiagnostic(error.value));
+const diagnosticWarnings = computed(() => Array.from(new Set([
+  ...(job.value?.discoveryWarnings || []),
+  ...(job.value?.warnings || []),
+].map(redactDiagnostic).filter(Boolean))));
+const showZeroCandidateHelp = computed(() => (
+  ['completed', 'blocked'].includes(job.value?.status || '')
+  && (job.value?.normalizedCount ?? job.value?.candidateCount ?? 0) === 0
+));
 const reviewQueue = computed(() => {
   const items = review.value?.candidates || [];
   const pending = items.filter(item => item.reviewStatus === 'pending');
@@ -271,6 +319,7 @@ let heatLayer: any = null;
 const statusLabel = (value?: string) => ({ queued: '排队中', running: '采集中', completed: '待审核', blocked: '已阻塞', failed: '失败' }[value || ''] || value || '未知');
 const webSearchLabel = (value?: string) => ({ not_requested: '未请求', unconfigured: '未配置', completed: '已完成', empty: '无结果', failed: '失败' }[value || ''] || value || '未知');
 const stageLabel = (value?: string) => ({ harvest: '采集来源', normalize: '整理候选', complete: '等待审核', failed: '失败' }[value || ''] || value || '准备中');
+const discoveryMethodLabel = (value?: string) => ({ local_config: '本地校区配置', amap_geocode: '高德地理编码' }[value || ''] || value || '未返回');
 const themeLabel = (value?: string) => ({ walk: '散步', date: '约会', photo: '拍照', flower: '赏花', study: '学习', food: '餐饮', general: '综合' }[value || ''] || value || '综合');
 const sourceLabel = (value?: string) => ({ amap: '高德 POI', amap_plant: '高德植物候选', amap_scene: '高德场景候选', public_web: '公开网页', public_web_plant: '网页植物证据', public_web_scene: '网页场景证据', campus_registry: '已登记植物', scene_registry: '已登记场景', json: 'JSON 来源' }[value || ''] || value || '未知来源');
 const reviewLabel = (value: ReviewStatus) => ({ pending: '待审', approved: '已通过', rejected: '已拒绝' }[value]);
@@ -384,6 +433,11 @@ const submit = async () => {
     job.value = {
       success: true, id: result.jobId, status: 'queued', theme: result.theme,
       keywords: result.keywords, sources: result.sources,
+      discovery: {
+        ...result.profile?.discovery,
+        resolvedSchool: result.profile?.discovery?.resolvedSchool || result.profile?.school?.name,
+        resolvedCampus: result.profile?.discovery?.resolvedCampus || result.profile?.campus?.name,
+      },
       discoveryWarnings: result.warnings, webSearch: result.webSearch,
     };
     startPolling();
@@ -513,7 +567,17 @@ onBeforeUnmount(() => { if (timer) window.clearInterval(timer); clearMarkers(); 
 .request-options { margin-top: 10px; } .request-options .el-input { flex: 1; } .resume-row { margin-top: 10px; max-width: 420px; } .resume-row .el-input { flex: 1; }
 .source-options { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 9px; } .source-hint { color: #909399; font-size: 12px; }
 .review-token-row { display: grid; grid-template-columns: minmax(280px, 1fr) 1.4fr; align-items: center; gap: 12px; margin-top: 10px; } .review-token-row span { color: #909399; font-size: 12px; }
-.error { color: #f56c6c; font-size: 13px; margin-top: 8px; } .warning { color: #b88230; font-size: 12px; margin-top: 8px; }
+.error { color: #f56c6c; font-size: 13px; margin-top: 8px; }
+.discovery-details { margin-top: 10px; padding: 10px 12px; border: 1px solid #d9ecff; border-radius: 8px; background: #f4f9ff; color: #606266; font-size: 12px; }
+.discovery-details strong { color: #337ecc; }
+.discovery-details dl { display: flex; flex-wrap: wrap; gap: 7px 22px; margin: 7px 0 0; }
+.discovery-details dl div { display: flex; min-width: 170px; gap: 6px; }
+.discovery-details dt { color: #909399; }
+.discovery-details dd { margin: 0; color: #303133; word-break: break-word; }
+.warning-list, .zero-candidate-help { margin-top: 10px; padding: 10px 12px; border: 1px solid #f3d19e; border-radius: 8px; background: #fdf6ec; color: #8a5a16; font-size: 12px; line-height: 1.55; }
+.warning-list ul, .zero-candidate-help ul { margin: 5px 0 0; padding-left: 18px; }
+.zero-candidate-help { border-color: #fab6b6; background: #fef0f0; color: #b42318; }
+.zero-candidate-help p { margin-top: 5px; }
 .search-results { margin-top: 10px; color: #606266; font-size: 12px; } .search-results summary { cursor: pointer; color: #409eff; } .search-results ol { margin: 8px 0 0; padding-left: 22px; } .search-results li { margin: 5px 0; } .search-results a { color: #409eff; word-break: break-all; } .search-results small { display: block; margin-top: 2px; color: #909399; }
 .job-summary { flex-wrap: wrap; color: #606266; font-size: 13px; } .job-summary div { padding-right: 16px; border-right: 1px solid #ebeef5; } .job-summary div:last-child { border-right: 0; } .job-summary span { color: #909399; margin-right: 5px; } code { color: #909399; font-size: 11px; }
 .workspace { display: grid; grid-template-columns: minmax(320px, 430px) minmax(0, 1fr); min-width: 0; gap: 14px; min-height: 560px; } .candidate-panel { min-width: 0; overflow: auto; max-height: 680px; } .panel-head { justify-content: space-between; align-items: flex-start; } .review-stats { margin: 14px 0 8px; }

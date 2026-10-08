@@ -568,7 +568,18 @@ class GeneratorTests(unittest.TestCase):
                 return "a" * 32
 
             def get(self, job_id):
-                return {"id": job_id, "status": "completed", "output": "private/path"}
+                return {
+                    "id": job_id,
+                    "status": "completed",
+                    "output": "private/path",
+                    "discovery": {
+                        "method": "amap_geocode",
+                        "resolvedSchool": "示例大学",
+                        "resolvedCampus": "示例校区",
+                    },
+                    "discoveryWarnings": ["discovery warning"],
+                    "warnings": ["harvest warning"],
+                }
 
         profile_path = Path(__file__).resolve().parents[2] / "build" / "api-test-profile.json"
         profile_path.parent.mkdir(parents=True, exist_ok=True)
@@ -589,6 +600,9 @@ class GeneratorTests(unittest.TestCase):
             self.assertEqual(status.status_code, 200)
             self.assertEqual(status.get_json()["output"], "a" * 32)
             self.assertNotIn("profile", status.get_json())
+            self.assertEqual(status.get_json()["discovery"]["resolvedSchool"], "示例大学")
+            self.assertEqual(status.get_json()["discoveryWarnings"], ["discovery warning"])
+            self.assertEqual(status.get_json()["warnings"], ["harvest warning"])
         finally:
             server._CAMPUS_BUILD_MANAGER = original_manager
             profile_path.unlink(missing_ok=True)

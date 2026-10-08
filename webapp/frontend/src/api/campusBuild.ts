@@ -13,6 +13,20 @@ export interface WebSearchAudit {
   acceptedUrlCount: number;
 }
 
+export interface CampusDiscoveryDetails {
+  method?: string;
+  query?: string;
+  address?: string;
+  resolvedSchool?: string;
+  resolvedCampus?: string;
+}
+
+export interface CampusProfileSummary {
+  school?: { name?: string };
+  campus?: { name?: string; center?: [number, number]; slug?: string };
+  discovery?: CampusDiscoveryDetails;
+}
+
 export interface CandidatePoi {
   id: string;
   name: string;
@@ -57,6 +71,7 @@ export interface BuildJob {
   pendingInvalid?: number;
   warnings?: string[];
   discoveryWarnings?: string[];
+  discovery?: CampusDiscoveryDetails;
   webSearch?: WebSearchAudit;
   error?: string | null;
   previewStatus?: string;
@@ -68,10 +83,7 @@ export interface ReviewBundle {
   jobId: string;
   school: string;
   campus: string;
-  profile?: {
-    school?: { name?: string };
-    campus?: { name?: string; center?: [number, number]; slug?: string };
-  };
+  profile?: CampusProfileSummary;
   candidates: CandidatePoi[];
   pendingInvalid: Array<{ candidate?: Record<string, unknown>; reason?: string }>;
   approved: CandidatePoi[];
@@ -121,7 +133,7 @@ export function submitCampusDiscovery(payload: {
 }): Promise<{
   success: boolean;
   jobId: string;
-  profile: ReviewBundle['profile'];
+  profile: CampusProfileSummary;
   theme: string;
   keywords: string[];
   sources: string[];

@@ -7,7 +7,9 @@ import hashlib
 import ipaddress
 import math
 import os
+import re
 import socket
+import threading
 import time
 from dataclasses import dataclass
 from html.parser import HTMLParser
@@ -73,19 +75,98 @@ class HarvestCache:
         path = self.directory / f"{self.key(source, parameters)}.json"
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-            if time.time() - float(data["storedAt"]) > self.ttl_seconds:
+            entry_ttl = max(0, int(data.get("ttlSeconds", self.ttl_seconds)))
+            effective_ttl = min(self.ttl_seconds, entry_ttl)
+            if time.time() - float(data["storedAt"]) > effective_ttl:
                 return None
             return data["value"]
         except (OSError, ValueError, KeyError, TypeError):
             return None
 
-    def put(self, source: str, parameters: dict, value) -> None:
+    def put(self, source: str, parameters: dict, value, *,
+            ttl_seconds: int | None = None) -> None:
         self.directory.mkdir(parents=True, exist_ok=True)
         path = self.directory / f"{self.key(source, parameters)}.json"
         temporary = path.with_suffix(".tmp")
-        temporary.write_text(json.dumps({"storedAt": time.time(), "value": value},
-                                        ensure_ascii=False), encoding="utf-8")
+        record = {"storedAt": time.time(), "value": value}
+        if ttl_seconds is not None:
+            record["ttlSeconds"] = max(0, int(ttl_seconds))
+        temporary.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
         temporary.replace(path)
+
+
+class AmapProviderError(RuntimeError):
+    """A provider-declared failure without request URL or credential details."""
+
+    def __init__(self, info: object = None, infocode: object = None):
+        super().__init__("AMap provider request failed")
+        self.info = str(info or "unknown error")
+        self.infocode = str(infocode or "unknown")
+
+
+_AMAP_RETRYABLE_INFOCODES = {
+    # Provider-side QPS, gateway, busy and temporarily unavailable failures.
+    "10014", "10015", "10016", "10017", "10019", "10020", "10021", "10022", "10023",
+}
+_AMAP_RETRYABLE_INFO_MARKERS = (
+    "QPS", "QPM", "BUSY", "GATEWAY", "TIMEOUT", "TEMPORAR", "UNAVAILABLE", "繁忙", "超限",
+)
+_SAFE_LOG_URL = re.compile(r"https?://\S+", re.IGNORECASE)
+_SAFE_LOG_CREDENTIAL = re.compile(
+    r"(?i)\b(?:key|api[_-]?key|token|authorization)\s*[=:]\s*[^\s,;]+"
+)
+
+
+def _bounded_env_number(name: str, default: float, minimum: float, maximum: float) -> float:
+    try:
+        value = float(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        value = default
+    if not math.isfinite(value):
+        value = default
+    return min(max(value, minimum), maximum)
+
+
+def _safe_log_value(value: object, api_key: str = "") -> str:
+    """Keep provider diagnostics useful while stripping URLs and credentials."""
+
+    text = " ".join(str(value or "unknown").split())
+    if api_key:
+        text = text.replace(api_key, "[redacted-key]")
+    text = _SAFE_LOG_URL.sub("[redacted-url]", text)
+    text = _SAFE_LOG_CREDENTIAL.sub("[redacted-credential]", text)
+    return text[:240]
+
+
+class _AmapRequestGate:
+    """Process-wide request-start limiter shared by production harvesters."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._last_started: float | None = None
+
+    def wait(self, interval: float) -> None:
+        if interval <= 0:
+            return
+        with self._lock:
+            now = time.monotonic()
+            if self._last_started is not None:
+                delay = interval - (now - self._last_started)
+                if delay > 0:
+                    time.sleep(delay)
+            self._last_started = time.monotonic()
+
+
+_AMAP_REQUEST_GATE = _AmapRequestGate()
+
+
+class _AmapRequestFailure(RuntimeError):
+    """Internal wrapper carrying only already-sanitized request diagnostics."""
+
+    def __init__(self, cause: Exception, failures: list[str]):
+        super().__init__("AMap request attempts failed")
+        self.cause = cause
+        self.failures = list(failures)
 
 
 class AmapPoiHarvester:
@@ -101,7 +182,13 @@ class AmapPoiHarvester:
     def __init__(self, profile: dict, keywords: list[str], api_key: str | None = None,
                  cache: HarvestCache | None = None, *, max_pages: int = 2,
                  page_size: int = 25, timeout: float = 10,
-                 request_json: Callable | None = None):
+                 request_json: Callable | None = None,
+                 request_interval_seconds: float | None = None,
+                 max_retries: int | None = None,
+                 retry_backoff_seconds: float | None = None,
+                 empty_cache_ttl_seconds: int | None = None,
+                 sleep: Callable[[float], None] = time.sleep,
+                 monotonic: Callable[[], float] = time.monotonic):
         self.profile = profile
         self.keywords = list(dict.fromkeys(str(k).strip() for k in keywords if str(k).strip()))[:20]
         self.api_key = (api_key or os.getenv("AMAP_WEB_SERVICE_KEY", "")).strip()
@@ -109,15 +196,105 @@ class AmapPoiHarvester:
         self.max_pages = min(max(int(max_pages), 1), 5)
         self.page_size = min(max(int(page_size), 1), 25)
         self.timeout = min(max(float(timeout), 1), 20)
-        self.request_json = request_json or self._request_json
+        default_request = self._request_json
+        self.request_json = request_json or default_request
+        self._default_request_json = default_request if request_json is None else None
+        self._custom_request = request_json is not None
+        self._request_interval_explicit = request_interval_seconds is not None
+        default_interval = 0.0 if self._custom_request else _bounded_env_number(
+            "AMAP_REQUEST_INTERVAL_SECONDS", 0.25, 0.0, 10.0,
+        )
+        self.request_interval_seconds = min(max(float(
+            default_interval if request_interval_seconds is None else request_interval_seconds
+        ), 0.0), 10.0)
+        configured_retries = _bounded_env_number("AMAP_MAX_RETRIES", 2, 0, 5)
+        self.max_retries = min(max(int(
+            configured_retries if max_retries is None else max_retries
+        ), 0), 5)
+        configured_backoff = _bounded_env_number("AMAP_RETRY_BACKOFF_SECONDS", 0.5, 0.0, 10.0)
+        self.retry_backoff_seconds = min(max(float(
+            configured_backoff if retry_backoff_seconds is None else retry_backoff_seconds
+        ), 0.0), 10.0)
+        configured_empty_ttl = _bounded_env_number("AMAP_EMPTY_CACHE_TTL_SECONDS", 300, 0, 3600)
+        self.empty_cache_ttl_seconds = min(max(int(
+            configured_empty_ttl if empty_cache_ttl_seconds is None else empty_cache_ttl_seconds
+        ), 0), 3600)
+        self._sleep = sleep
+        self._monotonic = monotonic
+        self._last_request_started: float | None = None
 
     def _request_json(self, params: dict) -> dict:
         response = requests.get(self.endpoint, params=params, timeout=self.timeout)
         response.raise_for_status()
-        data = response.json()
-        if data.get("status") != "1":
-            raise RuntimeError(f"AMap API error: {data.get('info', 'unknown error')}")
-        return data
+        return response.json()
+
+    def _wait_for_request_slot(self) -> None:
+        if self.request_interval_seconds <= 0:
+            return
+        # Tests and offline callers sometimes replace request_json after
+        # construction.  Such injected requesters remain unthrottled unless
+        # an interval was explicitly requested.
+        using_default_request = (
+            self._default_request_json is not None and
+            self.request_json is self._default_request_json
+        )
+        if not using_default_request and not self._request_interval_explicit:
+            return
+        if using_default_request and self._sleep is time.sleep and self._monotonic is time.monotonic:
+            _AMAP_REQUEST_GATE.wait(self.request_interval_seconds)
+            return
+        now = self._monotonic()
+        if self._last_request_started is not None:
+            delay = self.request_interval_seconds - (now - self._last_request_started)
+            if delay > 0:
+                self._sleep(delay)
+        self._last_request_started = self._monotonic()
+
+    @staticmethod
+    def _validated_payload(payload: object) -> dict:
+        if not isinstance(payload, dict):
+            raise ValueError("AMap response must be a JSON object")
+        if str(payload.get("status", "")) != "1":
+            raise AmapProviderError(payload.get("info"), payload.get("infocode"))
+        if payload.get("pois") is not None and not isinstance(payload.get("pois"), list):
+            raise ValueError("AMap response field 'pois' must be a list")
+        return payload
+
+    @staticmethod
+    def _retryable_error(exc: Exception) -> bool:
+        if isinstance(exc, AmapProviderError):
+            info = exc.info.upper()
+            return (exc.infocode in _AMAP_RETRYABLE_INFOCODES or
+                    any(marker in info for marker in _AMAP_RETRYABLE_INFO_MARKERS))
+        if isinstance(exc, requests.HTTPError):
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            return status in {429, 500, 502, 503, 504}
+        return isinstance(exc, (requests.Timeout, requests.ConnectionError))
+
+    def _safe_error_detail(self, exc: Exception) -> str:
+        if isinstance(exc, AmapProviderError):
+            info = _safe_log_value(exc.info, self.api_key)
+            infocode = _safe_log_value(exc.infocode, self.api_key)
+            return f"provider error info={info} infocode={infocode}"
+        if isinstance(exc, requests.HTTPError):
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            return f"HTTPError httpStatus={status if status is not None else 'unknown'}"
+        return type(exc).__name__
+
+    def _request_page(self, params: dict) -> tuple[dict, list[str]]:
+        failures: list[str] = []
+        for attempt in range(self.max_retries + 1):
+            self._wait_for_request_slot()
+            try:
+                return self._validated_payload(self.request_json(params)), failures
+            except (requests.RequestException, RuntimeError, ValueError) as exc:
+                failures.append(self._safe_error_detail(exc))
+                if attempt >= self.max_retries or not self._retryable_error(exc):
+                    raise _AmapRequestFailure(exc, failures) from exc
+                delay = self.retry_backoff_seconds * (2 ** attempt)
+                if delay > 0:
+                    self._sleep(delay)
+        raise AssertionError("unreachable")
 
     def _collect_keyword(self, keyword: str) -> tuple[list[dict], list[str]]:
         campus = self.profile["campus"]
@@ -133,6 +310,8 @@ class AmapPoiHarvester:
         params_for_cache = {"campus": campus["slug"], "center": center, "radius": radius,
                             "keyword": keyword, "pages": self.max_pages,
                             "pageSize": self.page_size,
+                            # Invalidates legacy entries that may contain failed partial/empty results.
+                            "requestPolicyVersion": 2,
                             "spatialPolicy": {
                                 "version": 2,
                                 "method": "polygon" if boundary is not None else "radius_fallback",
@@ -144,10 +323,17 @@ class AmapPoiHarvester:
                             }}
         cached = self.cache.get(self.source, params_for_cache) if self.cache else None
         if cached is not None:
-            return cached, []
+            warnings = []
+            if cached == []:
+                warnings.append(
+                    f"AMap keyword {_safe_log_value(keyword, self.api_key)!r}: "
+                    "using cached successful empty result"
+                )
+            return cached, warnings
         if not self.api_key:
             raise ValueError("AMAP_WEB_SERVICE_KEY is not configured")
         results, warnings = [], []
+        completed = True
         excluded_outside = 0
         for page in range(1, self.max_pages + 1):
             params = {
@@ -160,9 +346,23 @@ class AmapPoiHarvester:
                 "extensions": "all",
             }
             try:
-                payload = self.request_json(params)
-            except (requests.RequestException, RuntimeError, ValueError) as exc:
-                warnings.append(f"AMap keyword {keyword!r} page {page}: {type(exc).__name__}")
+                payload, retry_failures = self._request_page(params)
+                if retry_failures:
+                    warnings.append(
+                        f"AMap keyword {_safe_log_value(keyword, self.api_key)!r} page {page}: "
+                        "recovered after "
+                        f"{len(retry_failures) + 1} attempts; prior failures: "
+                        + "; ".join(retry_failures)
+                    )
+            except _AmapRequestFailure as exc:
+                completed = False
+                partial_note = (
+                    "; partial result not cached" if page > 1 else "; failed result not cached"
+                )
+                warnings.append(
+                    f"AMap keyword {_safe_log_value(keyword, self.api_key)!r} page {page}: failed after "
+                    f"{len(exc.failures)} attempt(s): {'; '.join(exc.failures)}{partial_note}"
+                )
                 break
             pois = payload.get("pois") or []
             for poi in pois:
@@ -210,10 +410,26 @@ class AmapPoiHarvester:
         if excluded_outside:
             method = "polygon" if boundary is not None else "radius fallback"
             warnings.append(
-                f"AMap keyword {keyword!r}: excluded {excluded_outside} candidates outside campus {method}"
+                f"AMap keyword {_safe_log_value(keyword, self.api_key)!r}: excluded "
+                f"{excluded_outside} candidates outside campus {method}"
             )
-        if self.cache:
-            self.cache.put(self.source, params_for_cache, results)
+        if completed:
+            if self.cache and results:
+                self.cache.put(self.source, params_for_cache, results)
+            elif self.cache:
+                self.cache.put(
+                    self.source, params_for_cache, results,
+                    ttl_seconds=self.empty_cache_ttl_seconds,
+                )
+            if not results:
+                cache_note = (
+                    f"; cached for up to {self.empty_cache_ttl_seconds} seconds"
+                    if self.cache else "; cache disabled"
+                )
+                warnings.append(
+                    f"AMap keyword {_safe_log_value(keyword, self.api_key)!r}: request completed "
+                    f"successfully with 0 accepted POIs{cache_note}"
+                )
         return results, warnings
 
     def collect(self) -> HarvestResult:
