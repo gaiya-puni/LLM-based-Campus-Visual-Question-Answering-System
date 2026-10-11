@@ -34,12 +34,23 @@ def semantic_source_paths(base_dir: Union[str, Path]) -> list[Path]:
     return [base / SCENE_SOURCE_FILE, *poi_paths]
 
 
+def canonical_source_bytes(path: Union[str, Path]) -> bytes:
+    """Read a source file with line endings normalized to LF.
+
+    指纹必须与「检出方式」无关：Windows 上 `core.autocrlf=true` 会把文本文件检出成
+    CRLF，而 CI（Linux）检出成 LF。直接哈希 `read_bytes()` 会让同一份提交在两种环境
+    下算出不同指纹，于是"索引/缓存是否过期"的判断在 CI 里永远为真——`campus_pois.json`
+    一个文件就相差 139,213 个 `\\r`。
+    """
+    return Path(path).read_bytes().replace(b"\r\n", b"\n")
+
+
 def semantic_source_hash(paths: Iterable[Path]) -> str:
     """Hash source names and contents in their canonical discovery order."""
     digest = hashlib.sha256()
     for path in paths:
         digest.update(path.name.encode("utf-8"))
-        digest.update(path.read_bytes())
+        digest.update(canonical_source_bytes(path))
     return digest.hexdigest()
 
 

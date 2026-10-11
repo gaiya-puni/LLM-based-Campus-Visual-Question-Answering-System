@@ -18,6 +18,8 @@ from pathlib import Path
 
 import numpy as np
 
+from semantic_retrieval import canonical_source_bytes
+
 ALGORITHM_VERSION = "sakde-campus-9-knn-adaptive-bandwidth"
 SCENE_IDS = ("flower_viewing", "photo", "walk", "date")
 # 每个场景在每个校区展示的推荐点数（Top1..TopN）。该上限同时是 validate_payload 的
@@ -439,10 +441,16 @@ def source_paths(base: Path) -> list[Path]:
 
 
 def fingerprint(base: Path, model: str) -> str:
+    """指纹 = 算法版本 + 模型标识 + 被绑定的源文件内容。
+
+    源文件内容一律经 ``canonical_source_bytes`` 读取（行尾归一为 LF）：否则
+    Windows（`core.autocrlf=true`，检出为 CRLF）与 CI（LF）会算出不同指纹，
+    缓存会被永久误判为过期——见 `test_repository_cache_manifest_matches_current_sources`。
+    """
     digest = hashlib.sha256((ALGORITHM_VERSION + model).encode("utf-8"))
     for path in source_paths(base):
         digest.update(path.name.encode("utf-8"))
-        digest.update(path.read_bytes())
+        digest.update(canonical_source_bytes(path))
     return digest.hexdigest()
 
 
