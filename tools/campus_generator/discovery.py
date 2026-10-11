@@ -844,7 +844,6 @@ class SearchEvidenceEnricher:
             source_urls = candidate.get("sourceUrls") or []
             if isinstance(source_urls, str):
                 source_urls = [source_urls]
-            primary_source = str(candidate.get("source") or self.source)
             candidate_urls = {
                 str(value).split("#", 1)[0]
                 for value in source_urls if str(value).strip()

@@ -6,8 +6,39 @@
 
 > **2026-09-28 接手补充**：三校区运行时与资产链已接通。热图构建和语义索引现在统一自动发现
 > `*_pois.json`，缓存已按当前源码重建；语义索引含 3122 条 POI。交大闵行的拍照/散步/约会热图可用，
-> 赏花因没有植物点位而明确降级，不影响其他场景。本文所述 `tools/campus_generator/` 未出现在当前仓库、
-> stash 或可见历史中，后续做 CLI 前应先向原同事取回源码；取不回再按契约重建。
+> 赏花因没有植物点位而明确降级，不影响其他场景。
+
+> **2026-10-10 本轮改动（接手前必读）**
+>
+> 1. **`tools/campus_generator/` 其实一直在仓库里**（20 个 `.py`：15 个模块 + 5 个测试，另有
+>    `CAMPUS_GENERATOR.md`）。本文 2026-09-28 那条"未出现在当前仓库、需向原同事取回"的结论**是错的**，
+>    已更正；§7.2 的现状盘点也同步纠正（旧版把文件名写成了 `harvest_amap.py` / `build_assets.py` 等，
+>    与仓库实际不符）。真正还缺的是 `campuses/profiles/sjtu.json` 这类**档案文件**（该目录不存在）。
+> 2. **后端入口已模块化**：`server.py` 从 4544 行收敛为 **91 行门面**（只做导入、re-export、启动）。
+>    业务在 `api/{campus_build,chat,userdata,auth}_api.py`；公共设施在 `flask_app.py`（app/配置/CORS/
+>    限流/请求体超限 JSON 错误）、`runtime.py`（**门面解析器**，兼容 `python server.py` 与 `import server`）、
+>    `llm_config.py`（服务商与视觉能力）、`poi_data.py`、`retrieval_engine.py`、`auth_db.py`、`paths.py`。
+>    **本文后续章节里所有"在 `server.py` 里改的 XXX"一律理解成"已搬到上述模块"**，符号名不变。
+> 3. **图片（多模态）链路已接通**：此前 `parse_attachments` / `build_llm_messages` /
+>    `extract_places_from_photo` 只有实现、没有调用方（前端也没有入口），本轮补全为可用功能；
+>    同时修掉"单张允许 4MB 但全局请求体只有 1MB"的自相矛盾（现为 12MB + JSON 413）。
+>    细节见 §8。
+> 4. **测试与工程基线**：新增 5 个测试文件 74 个用例（`test_api_auth` 18 / `test_api_userdata` 18 /
+>    `test_api_campus_build` 8 / `test_chat_vision` 21 / `test_outbound` 9）；全仓 `python -m pytest -q` → **400 passed / 1 skipped**；
+>    引入 `ruff`（`pyproject.toml`）与 `.github/workflows/ci.yml`（push/PR 自动跑 ruff + pytest）。
+> 5. ⚠️ **认养人个人信息不得删改**：`data/*.json`、`campus_pois.json`、`data_for_sankey.json`、
+>    `emotion_analysis.json` 里的认养人姓名/单位/寄语，是经本人同意在校园小程序「芳秾」与官网上公开的内容，
+>    **原样保留**；`scripts/sanitize_public_data.py` **不要**当常规清理跑（本轮曾误运行，已全部回滚还原）。
+> 6. 新增评估文档 [`docs/FEATURE_FEASIBILITY.md`](docs/FEATURE_FEASIBILITY.md)：**8 项候选功能**（§2~§9）
+>    + **4 项中长期升级方向**（§12）的可行性、安全风险、成本与优先级，结论均由实测数据支撑。
+>    升级方向的结论一句话：**4 项都没有卡在难度，全部卡在前置条件**——边界数据缺失
+>    （`campuses.json` 只有 `center` + `trustRadiusM`，运行时 `campus_at()` 仍是纯半径判定）、
+>    多校 schema 未对齐（生成器不能重跑）、确定性路由被测试锁定（智能体化只能做加法）、
+>    小程序涉及"二次展示认养人信息"的同意范围（需先有合规结论）。依赖顺序见该文档 §12.5。
+> 7. **同日追加的两处修复 + 一处勘误**：见 §10（场景热图渲染重做、采集侧出站代理修复）
+>    与 §11（热图 KDE 带宽算法升级）；
+>    并**更正**上一版本文档里"嵌入检索在本机崩溃 `0xC0000005`"的**误报**——复测模型加载正常、
+>    嵌入模式 `passed=50/50`、退出码 0。真正的评测短板是**现有 50 例对规则与嵌入两种后端都是满分**（无区分度）。
 
 ---
 
@@ -161,7 +192,7 @@ git pull
    于是没有点位、没有推荐上下文；
 5. 模型手上只剩系统提示里的"上下文里没有就说没有""不要编造路线"，只能如实回绝。
 
-### 3.2 修法（都在 `server.py`）
+### 3.2 修法（原都在 `server.py`；2026-10-10 起拆到 `api/chat_api.py`，见文首更新块）
 
 | 改动 | 说明 |
 |---|---|
@@ -288,30 +319,38 @@ cd ../..; python scripts/check_publication.py   # 提交前脱敏检查（务必
 4. 产出"待确认清单 + 采集报告"，条目带来源与置信度；
 5. 生成器自身有单测与文档。
 
-### 7.2 现状盘点（截至本次提交）
+### 7.2 现状盘点（截止 2026-10-10 更正）
 
-**已完成**（`tools/campus_generator/`，交大闵行试点已手工端到端跑通）：
+> ⚠️ **本节原版有误**：旧版把模块名写成 `harvest_amap.py` / `harvest_public.py` / `build_assets.py`（仓库里没有这些文件），
+> 并声称"生成器零测试""缺 `CAMPUS_GENERATOR.md`""`cli.py` 不存在"。实际仓库中的文件与状态如下。
+
+**已完成**（`tools/campus_generator/`，共 20 个 `.py`）：
 
 | 环节 | 文件 | 状态 |
 |---|---|---|
-| 校区档案 + 校验 | `profile.py`、`campuses/profiles/sjtu.json` | 可用（`validate_profile`、`runtime_config`、`reserved_symbols`）；能拦住"校区名/slug 与既有校区撞车" |
-| 高德采集 | `harvest_amap.py` | 可用（网格周边搜索 + 关键字补漏、分页限速重试、**断点续采** `responses.jsonl`、跨校区过滤、采集报告）。实测 58 请求 0 失败、648 候选、校内 100 条 |
-| 公开资料 | `harvest_public.py` | 代码可用；**检索环节仍靠人工/agent skill**（wechat-article-search / 网络检索），产出带 URL 的来源清单，再由大模型抽成带来源与置信度的候选 |
-| 归一质检 | `normalize.py`、`validate.py` | 可用（映射 POI 契约、`write_pending` 待确认清单、只读质检）。实测 648 → 80 条正式 POI + 85 条待确认，质检 80 通过 / 0 未通过 |
-| 资产重建 | `build_assets.py` + `build_semantic_index.py` + `build_scene_heatmaps.py` | 基本配置驱动（`*_pois.json` 自动发现、按 `heatmap_config.json` 遍历），含"改坏既有校区"的缓存快照保护 |
+| 校区档案 + 校验 | `profile.py`、`validate.py`、`boundary.py` | 可用（档案校验、校区边界与可信半径、`reserved_symbols` 拦住校区名/slug 撞车） |
+| 采集 | `harvest.py`、`discovery.py`、`web_search.py` | 可用（高德 POI 采集 + 公开网页采集 + Tavily/Brave 自动检索、缓存、限速与安全校验） |
+| 归一质检 | `normalize.py`、`quality.py`、`formal_asset_io.py` | 可用（映射 POI 契约、可解释候选质量评分、待确认清单、原子写） |
+| 任务与发布 | `jobs.py`、`review.py`、`preview.py`、`publish.py` | 可用（有界任务队列与状态恢复、人工审核、临时热图预览、差异计划 + 哈希校验 + 双备份 + 回滚） |
+| 统一入口 | `cli.py` | **已存在**（旧版写的"不存在"已过期） |
+| 资产重建 | `build_semantic_index.py` + `build_scene_heatmaps.py` | 配置驱动（`*_pois.json` 自动发现、按 `heatmap_config.json` 遍历），含 stale 保护 |
+| 测试 | `test_generator.py`、`test_jobs.py`、`test_discovery_parser.py`、`test_web_search.py`、`test_amap_resilience.py` | **5 个测试文件，非"零测试"** |
+| 文档 | `CAMPUS_GENERATOR.md` | **已存在** |
 
-**缺失**（按"还差什么才能一键产出"排序）：
+**真正还缺的**（按"还差什么才能一键产出"排序）：
 
-1. **统一入口 `cli.py` 不存在**：现需手工按序跑 5 个脚本并正确传 `--profile/--against/--harvest-dir`，无分步、续跑、报告聚合。
-2. **多校 schema 断层（最危险）**：`profile.runtime_config()` 只产出单数 `school` + `campuses`，不含 `schools` 表、每校区
-   `school` 外键与 `brand`；而现行 `campuses.json` 有这些字段，且 `campus_config.check_consistency` **要求**多校下每校区
-   必须有 `school`。**直接重跑 `build_assets.py` 会丢字段并挂一致性检查**。
-3. **`heatmap_config.json` 的新校区条目仍要手工加**（`slug/center/auditRadiusMeters`），与 `build_assets.py` 的文档承诺不符。
-4. **生成器零测试**（全仓没有针对 `tools/campus_generator/*` 的单测）。
-5. **缺 `CAMPUS_GENERATOR.md`** 与实例启动脚本；`.codebuddy/plans/campus-system-generator_e5cbd530(未完成).md` 里
-   `e2e-sjtu`、`package-cli` 仍为 pending。
-6. **植物数据降级未单独验证**：新学校没有 `data/all_trees.json`（学校专有、不可分发），应确认图鉴/寄语/预测按"无内容"降级，
+1. **档案文件缺失**：`campuses/profiles/sjtu.json` 所在目录 `campuses/` **当前不存在**，新校区试点只能靠参数临时传入，
+   不能重跑出与现有三校区一致的产物。
+2. **多校 schema 对齐**：`profile.runtime_config()` 产出的结构与现行 `campuses.json`（含 `schools` 表、每校区
+   `school` 外键、`brand`）需要核对；`campus_config.check_consistency` 对多校有强校验，重跑资产生成前必须先对齐，
+   否则会丢字段并挂在一致性检查上。
+3. **`heatmap_config.json` 的新校区条目仍要手工加**（`slug/center/auditRadiusMeters`）。
+4. **新校区植物数据降级未单独验证**：新学校没有 `data/all_trees.json` 时，应确认图鉴/寄语/预测按"无内容"降级，
    只保留"打点 + 问答 + 热图 + 行程"。
+5. `.codebuddy/plans/` 里 `e2e-sjtu`、`package-cli` 仍为 pending。
+
+> 关于植物数据的说明（**已更正**）：`data/all_trees.json` 等文件中的认养人姓名/单位/寄语是**经本人同意**在
+> 校园小程序「芳秾」与官网上公开的内容，本项目**原样保留**，不是需要清理的"专有敏感数据"。
 
 ### 7.3 分阶段路线（建议直接照做）
 
@@ -354,9 +393,223 @@ cd ../..; python scripts/check_publication.py   # 提交前脱敏检查（务必
 
 1. **`.codebuddy/` 目录是项目数据，不要删除**；仓库里的 `scripts/check_publication.py` 必须在每次提交前跑。
 2. `.env`、`*.env` 永不入库；密钥只在本机。高德要区分**浏览器 Key**（前端、限域名配额）与 **Web 服务 Key**（后端脚本）。
-3. 植物相关数据（`data/all_trees.json`、`data/all_templates.json`）**属学校专有，不可对外分发**。
+3. 植物相关数据（`data/all_trees.json`、`data/all_templates.json`、`campus_pois.json` 等）中，认养人的
+   姓名/单位/寄语是**经本人同意**在校园小程序「芳秾」与官网上公开的内容，**原样保留、不做删改、不做脱敏**；
+   引用时注明来源即可。`scripts/sanitize_public_data.py` **不要**当常规清理步骤执行。
 4. 高德与大模型都有配额：采集器必须限速 + 断点续采；批量大模型研判要带台账（避免重复付费），本次的 `llm_scan.jsonl` 就是范例。
 5. 语义索引会随 POI/场景文件变化而 `stale`，重建（`build_semantic_index.py`）后再把 `SEMANTIC_ENABLED` 调回 `auto`。
+
+---
+
+## 8. 图片（多模态）问答链路：本轮补全的"死代码"
+
+### 8.1 之前的状态（坑）
+后端 `parse_attachments` / `build_llm_messages` / `extract_places_from_photo` /
+`build_photo_poi_context` / `_image_capability_clause` **全都有实现，但没有任何调用方**：
+`/api/chat` 从不读 `attachments` 字段，前端也没有上传入口（注释里提到的 `imageAttach.ts` 全仓不存在）。
+更糟的是两处上限自相矛盾：单张允许 **4MB**、最多 2 张，而 Flask 全局 `MAX_CONTENT_LENGTH` 默认 **1MB** ——
+即使补了前端入口，稍大的照片也会在进入业务逻辑前被 Flask 以 413 拒绝，且返回的是前端解析不了的 HTML 错误页。
+
+### 8.2 现在的链路
+```
+前端输入区（点选 / 拖拽 / 粘贴 / 移动端拍照）
+  → imageAttach.ts：类型白名单 + 长边压缩到 1600px（>900KB 才重编码，避免截图二次有损）
+  → payload 带 attachments: [{mime, dataUrl}]
+  → /api/chat：parse_attachments（张数/类型/单张体积，声明 mime 必须与 dataUrl 前缀一致）
+  → 若已配置视觉模型：extract_places_from_photo 抽"图中可读地点名"（失败只返回 []，不影响主回答）
+     → match_pois_by_names 命中校园 POI → 写进 system prompt + 追加地图打点（kind = photo_poi）
+  → build_llm_messages：附件只并入**最后一条**用户消息；历史轮次保持字符串（否则每轮重发 base64）
+  → 回答按能力如实生成文案（未启用视觉时说"本部署未启用图片理解"，不假装看过图）
+```
+
+### 8.3 必须保持的口径（改一处要改多处）
+| 约束 | 值 | 位置 |
+|---|---|---|
+| 单轮最多张数 | 2 | `api/chat_api.py` `MAX_ATTACHMENTS` ↔ `imageAttach.ts` `MAX_ATTACHMENTS` |
+| 单张上限 | 4MB（base64 解码后） | `MAX_ATTACHMENT_BYTES` ↔ `imageAttach.ts` |
+| 允许类型 | jpeg / png / webp | `ATTACHMENT_MIMES` ↔ `imageAttach.ts` `ALLOWED_MIMES` |
+| 请求体总上限 | 12MB | `flask_app.ATTACHMENTS_BODY_BUDGET`（2×4MB base64 ≈ 10.7MB）↔ `.env` `MAX_CONTENT_LENGTH` |
+
+> ⚠️ 本地 `.env` 若仍写着 `MAX_CONTENT_LENGTH=1048576`，上传大图会 413；删掉该行或用 12582912。
+> 启动时若检测到上限低于预算，后端会打印一条中文警告。
+
+### 8.4 安全约定
+图片**不落盘**、日志只记张数与体积；校验失败一律 **400 并给出中文原因**（不静默丢弃，否则用户以为图传上去了）；
+**未配置视觉模型时不把图片转发给上游**（纯文本模型收到 `image_url` 会直接报错）；
+`/api/health` 新增 `vision` 字段，前端据此提示，但不阻断上传（换了 `.env` 不必刷新即可试）。
+
+### 8.5 测试与验证
+- `test_chat_vision.py`：**21 个用例**（附件校验 10、多模态消息构造 3、能力文案 2、端到端接线 6）。
+- 浏览器实测（Playwright）：注入 3 张图仅保留 2 张并提示"已忽略超出上限的 1 张"；1.43MB 原图压到 **283KB**；
+  粘贴与拖拽均生效（拖拽有高亮）；请求体确实带 2 条 `image/jpeg` 附件；用户气泡回显缩略图。
+
+---
+
+## 9. 本轮工程化基线（2026-10-10）
+
+| 项 | 内容 |
+|---|---|
+| 静态检查 | `pyproject.toml` 配 `ruff`：`select = ["F", "E9"]`（只查未定义名、未使用变量、语法级问题；行宽 120），测试文件豁免 `F401/F811`。规则集**刻意保守**——先接上 CI，等清理完成再逐步扩大（如加 `I` 做 import 排序）。`python -m ruff check .` 当前全绿 |
+| 依赖锁定 | `requirements.txt` 按本机（Python 3.10）实测版本 pin，**不要退回 `>=` 写法**；新增 `requirements-dev.txt`（`-r requirements.txt` + pytest/ruff/black）与 `requirements-ci.txt`（**不含 sentence-transformers/torch**） |
+| CI | `.github/workflows/ci.yml`：push/PR 跑 `python -m ruff check .` + `python -m pytest`（全量，不做标记过滤）。用 `requirements-ci.txt` 装依赖，靠"语义依赖缺失时自动回退关键词规则"的既有契约在无模型环境下跑通，与既有 `security-check.yml` 并行 |
+| 测试补齐 | 5 个新文件 **74** 个用例：路由层状态码契约（400/403/404/409/413）、问答入参校验、图片链路、出站代理策略 |
+| 热图渲染 | 新增 `heatmapRender.ts`（HSL 色带 / alpha 从 0 / 数值上采样 / 等值带 / 图例同源）；`cellMeters` 20→12 并重建 26 张缓存；清掉 4 个取不到的旧缓存 |
+| 出站代理 | 新增 `tools/campus_generator/outbound.py`；高德默认直连（修 `ProxyError`）、公开网页与境外搜索沿用系统设置 |
+| 清理 | 删除游离日志、空 `build/`；`.gitignore` 补 `.pytest_cache/`、`.ruff_cache/`、`.codebuddy/`、`.playwright-cli/` |
+| 文档 | 本文 + `PROJECT_STATUS.md` 纠偏；新增 `docs/FEATURE_FEASIBILITY.md`（8 项候选功能 + 4 项升级方向）。升级方向的两个硬前置：**边界数据缺失**与**多校 schema 未对齐**；唯一可立即开工的是移动端响应式 + 扫码入口 |
+
+> 拆分 `server.py` 时的关键决策：被测试 monkeypatch 的模块级符号（`_CAMPUS_BUILD_MANAGER`、
+> `CampusProfileResolver`、`WebSearchClient`、`plan_day`、`_itinerary_origin` 等）通过 `runtime.facade()`
+> **在调用时**解析，而不是导入时绑定；门面同时兼容 `python server.py`（`__main__`）与 `import server` 两种入口，
+> 否则会出现"第二份 app / 第二份任务管理器"。
+
+---
+
+## 10. 场景热图渲染重做 + 采集侧出站代理修复（2026-10-10 同日追加）
+
+### 10.1 热图渲染：从"糊一层脏灰绿"到"只显热点"
+
+**症状**：校园生成页的临时热图预览（以及问答页的场景热图）像是给地图蒙了一层均匀灰绿色，
+底图被压暗、热点也不突出。
+
+**三个实测病灶**（都在渲染层，不在算法层——栅格量程是用满的：`p50≈0.33`、`max=1.0`）：
+
+| 病灶 | 证据 | 修法 |
+|---|---|---|
+| alpha 有下限 → 整片区域被均匀上色 | 原 `campusBuild.vue` 用 `alpha=70+150t`、`SceneHeatmapPanel.vue` 用 `90+165t`；而**实测 87.2% 的有效格 t≥0.1、68.5% t≥0.2**（`t<0.1` 的格子只占 12.8%），等于"没什么热度"的区域也全都在上色 | alpha 从 **0** 起，低于阈值（0.12）完全不画，阈值以上用 `t^1.5` 抬升 |
+| RGB 线性插值中段发灰 | 原两段式 `r=41+174t, g=103+40(1-t), b=195-150t`，**t≈0.5 得 `rgb(128,123,120)`（纯灰）**；两处渲染色带还不一致 | 统一改 **HSL 插值**（色相单调 214→190→48→26→356），中段始终饱和 |
+| 低分辨率栅格直接拉伸 | 60×69 的栅格铺满整个 bounds | 先对**数值**做双线性上采样（3×）再着色，并叠加**等值带边界** |
+
+**落地**：
+- 新增 `webapp/frontend/src/components/heatmapRender.ts`（色带 / alpha / 上采样 / 等值带 / 图例 CSS 单一来源），
+  `SceneHeatmapPanel.vue` 与 `campusBuild.vue` 都改用它；
+- 生成页**补上了此前完全缺失的图例**（右下角，含"仅在同一校区、同一场景内比较"的说明）；
+- `heatmap_config.json` 的 `cellMeters` 从 **20 → 12**，并重建缓存：`python build_scene_heatmaps.py`
+  → `Ready: 26 scene maps`，栅格从 60×69 提升到 98×113 / 134×121 / 60×84；
+- 顺手删掉 4 个**永远取不到**的旧版无季节缓存（`minhang_flower_viewing.json`、`minhang_photo.json`、
+  `putuo_flower_viewing.json`、`putuo_photo.json`）——`flower_viewing`/`photo` 在 `HeatmapStore.get()`
+  里一定走季节文件（`season = current_season() if scene in ("flower_viewing","photo")`），这 4 个只会造成"缓存过期"的误判。
+
+> ⚠️ 改 `cellMeters` 会让 `fingerprint` 变化，**必须重建缓存**，否则 `/api/heatmaps` 会回
+> "热力图缓存已过期"。重建需要 BGE 模型（本机可正常加载）。
+
+### 10.2 高德采集全部 `ProxyError`：出站代理口径不一致
+
+**症状**：一次采集里 13 个关键词 × 3 次重试全部失败，
+`AMap keyword '...' page 1: failed after 3 attempt(s): ProxyError; ...; failed result not cached`，
+但看起来像"高德查不到数据"。
+
+**根因**（实测）：Windows 注册表里配了系统代理（`ProxyEnable=1`、`ProxyServer=127.0.0.1:7897`），
+`requests` 会读取它；而 `harvest.py` 的 `requests.get()` **没有传 `proxies`** → 高德（国内域名）走该代理 → `ProxyError`。
+**大模型调用没受影响**，因为 `llm_config.py` 显式传了 `{'http': None, 'https': None}` 绕开系统代理。
+
+> ⚠️ **踩坑点**：表示"直连"**不能**用 `proxies={}`——
+> `requests.Session.merge_environment_settings()` 会用 `setdefault` 把系统代理补回来。
+> 必须显式写成 `{'http': None, 'https': None}`。
+
+**修法**：新增 `tools/campus_generator/outbound.py`
+- `direct_proxies()`：**默认直连**，用于高德（可用 `AMAP_HTTP_PROXY` 覆盖）；
+- `system_proxies()`：**默认沿用系统设置**，用于公开网页与境外搜索（Tavily / Brave，可用 `WEB_HTTP_PROXY` 覆盖）。
+
+`harvest.py`（高德采集、公开网页抓取）与 `web_search.py`（Tavily / Brave）全部接上；
+新增 `tools/campus_generator/test_outbound.py`（9 例，含"真实调用点确实传了 proxies"的断言）守住这条契约。
+
+### 10.3 想启用"自动搜索公开网页"，`.env` 需要补这几行
+
+本机 `.env` 是早于该功能创建的，**没有** `TAVILY_API_KEY` 这一项（它只存在于 `.env.example`）。追加：
+
+```dotenv
+WEB_SEARCH_PROVIDER=tavily
+TAVILY_API_KEY=tvly-你的真实密钥
+```
+
+`AMAP_HTTP_PROXY` / `WEB_HTTP_PROXY` 默认不用配（不写就是"高德直连、其余跟随系统"）。
+
+---
+
+## 11. 热图 KDE 带宽算法升级（2026-10-10 同日追加）
+
+### 11.1 先发现的问题：原"自适应带宽"其实是失效的
+
+`scene_heatmaps.class_bandwidth()` 原公式：
+
+```python
+annd = mean(最近邻距离)                       # 全局标量
+zones = floor((points - origin) / zoneMeters)  # 按 200m 分格
+abundance_i = 该格点数 / n
+radius = exp(abundance_i) * max(annd, minInfluence)
+h_i = min(radius, maxInfluence) / 3
+```
+
+对全部 846 个（校区×场景×子类）分组实测：
+
+| 现象 | 数量 | 原因 |
+|---|---|---|
+| 组内带宽**完全相等**（自适应项失效） | **256 / 846（30.3%）** | 植物子类常常只有 2~4 棵，全落进同一格 → `abundance` 恒等 |
+| 被 `maxInfluence` **钳成常数 100m** | **151 / 846（17.9%）** | `exp(ab)·max(annd,80)` 普遍超过 300，`min()` 一刀切平 |
+| 组内带宽跨度中位 | 仅 **5.85 m** | 上述两条的直接结果 |
+
+也就是说：这个"自适应"机制在真实数据上基本没起作用。
+
+### 11.2 现在的公式（**尺度保持**）
+
+```python
+h_target = clip( geomean(旧规则逐点带宽), h_lo, h_hi )      # 只借用量级
+ρ_i      = 1 / max(d_k(x_i), 1m)²                            # k 近邻连续局部密度
+z_i      = (logρ_i − median(logρ)) / (1.4826·MAD)            # 稳健标准化
+w_i      = 0.5 + 0.5·tanh(β·z_i)                             # β = densityExponent
+h_i      = clip( h_target · (h_hi/h_lo)^(w_i − 0.5), h_lo, h_hi )
+# 再一步尺度回正，抵消钳位造成的几何均值漂移
+```
+
+三条设计理由（**改之前先读完，否则容易好心办坏事**）：
+
+1. **只改组内分布、不改整体量级**。锚点取旧规则逐点带宽的**几何均值**——这样热力场的整体尺度不变，
+   推荐点位不会因尺度漂移大面积换名。第一版（锚点用 `median(d1)`）就踩了这个坑：Top-1 在 13/26 张图上变化、
+   带宽中位从 33.55m 掉到 28.04m。改成几何均值锚点后降到 10/26、中位回到 35.62m。
+2. **连续 + 不饱和**。用 k 近邻距离代替 `zoneMeters` 格内计数，不再有"跨格边界跳变"，
+   也没有小组退化；调制在 `[h_lo, h_hi]` 内做**几何**伸缩，不会被硬钳成常数。
+3. **方向可配**（这点最容易搞错）：
+   - `β > 0`：**越密 → 带宽越大**（本项目既有语义，密集区连成一片宽热区）——**默认**；
+   - `β = 0`：精确退化为固定带宽（做 A/B 对照）；
+   - `β < 0`：教科书 **Abramson** 方向（越密 → 带宽越小，锐化密集区）。
+
+   > ⚠️ `test_scene_heatmaps.py::test_annd_and_relative_abundance` 把"越密→越宽"锁成了契约。
+   > 直接把默认改成 Abramson 方向会**破测试且改变产品观感**，那必须是一次有意识的产品决策。
+
+### 11.3 配置与开关
+
+```json
+"adaptiveBandwidth": { "method": "knn-density", "neighbourK": 4, "densityExponent": 1.0 }
+```
+
+- `method = "legacy"` → 完全回到旧算法。**已实测：legacy 模式与升级前逐点一致（Top-1 变化 0/26、
+  覆盖占比完全相同）**，所以回退是安全的。
+- `ALGORITHM_VERSION` 已 bump 到 `sakde-campus-9-knn-adaptive-bandwidth`；改这个文件会变更
+  `fingerprint`，**必须重建缓存**（`python build_scene_heatmaps.py`），否则 `/api/heatmaps` 回"缓存已过期"。
+- 改 `scene_heatmaps.py` 本身也会变更指纹（`source_paths` 含该文件），同样需要重建。
+
+### 11.4 实测对比（升级前 → 升级后）
+
+| 指标 | 升级前 | 升级后 | 判读 |
+|---|---|---|---|
+| 组内带宽跨度中位 | 5.85 m | **25.05 m** | 自适应项真正生效（4.3×） |
+| 带宽量级中位 | 33.55 m | 35.62 m | 量级保持（+6%） |
+| 有效格覆盖占比 | 0.5817 | **0.5817** | 完全不变（不改变数据覆盖范围） |
+| 场景区分度（相关系数均值） | 0.687 | **0.686** | 无退化，略优 |
+| 场景覆盖重叠（Jaccard 均值） | 0.891 | **0.891** | 完全一致 |
+| 平均绝对差 | 0.156 | 0.154 | 略优 |
+| Top-1 点位 | — | 10/26 变化 | 场形状变化的预期结果，**无标注无法判定孰优** |
+
+> 结论口径要诚实：**能证明的是"修好了失效机制、没有制造回归"**（覆盖不变、场景区分度不降、
+> 旧模式可逐点复现），**不能证明"推荐更准"**——那需要人工标注（见 §7.5 与
+> `docs/FEATURE_FEASIBILITY.md` §9）。
+
+### 11.5 相关测试
+
+`webapp/backend/test_scene_heatmaps.py` 新增 7 例：方向保持（β>0）、教科书方向可复现（β<0）、
+β=0 退化为固定带宽、重复坐标仍有限、未知 method 回退旧规则、非法配置在加载期被拒、
+以及**尺度保持**（组内几何均值漂移 ≤ 5%）。
 
 ---
 

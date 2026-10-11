@@ -1,6 +1,11 @@
 {
-  "version": 3,
-  "cellMeters": 20,
+  "version": 4,
+  "cellMeters": 12,
+  "adaptiveBandwidth": {
+    "method": "knn-density",
+    "neighbourK": 4,
+    "densityExponent": 1.0
+  },
   "zoneMeters": 200,
   "minInfluenceMeters": 80,
   "maxInfluenceMeters": 300,

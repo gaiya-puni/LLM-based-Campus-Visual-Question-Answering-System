@@ -67,9 +67,51 @@ class LlmProviderTests(unittest.TestCase):
 
     def test_every_provider_declares_the_same_fields(self):
         expected = {'label', 'api_key_env', 'api_url_env', 'api_url_default',
-                    'model_env', 'model_default'}
+                    'model_env', 'model_default', 'supports_vision'}
         for name, entry in server.LLM_PROVIDERS.items():
             self.assertEqual(set(entry), expected, name)
+
+
+class VisionResolutionTests(unittest.TestCase):
+    """图片理解能力的探测口径：默认关闭，显式配置才开启，且绝不静默借用文本模型。"""
+
+    def test_vision_is_off_by_default(self):
+        env = {'LLM_PROVIDER': 'deepseek', 'DEEPSEEK_API_KEY': 'sk-demo'}
+        self.assertIsNone(server.resolve_vision(env))
+        self.assertFalse(server.vision_available(env))
+
+    def test_explicit_false_wins_over_dedicated_key(self):
+        env = {'LLM_PROVIDER': 'deepseek', 'DEEPSEEK_API_KEY': 'sk-demo',
+               'VISION_ENABLED': 'false', 'VISION_API_KEY': 'sk-vision'}
+        self.assertIsNone(server.resolve_vision(env))
+
+    def test_dedicated_vision_key_inherits_provider_defaults(self):
+        env = {'LLM_PROVIDER': 'chatecnu', 'CHATECNU_API_KEY': 'sk-demo',
+               'VISION_API_KEY': 'sk-vision'}
+        config = server.resolve_vision(env)
+        self.assertEqual(config['api_key'], 'sk-vision')
+        self.assertEqual(config['model'], 'ecnu-plus')
+        self.assertEqual(config['api_url'],
+                         server.LLM_PROVIDERS['chatecnu']['api_url_default'])
+
+    def test_dedicated_vision_key_can_override_url_and_model(self):
+        env = {'VISION_API_KEY': 'sk-vision', 'VISION_MODEL': 'qwen-vl-max',
+               'VISION_API_URL': 'https://example.com/v1/chat/completions'}
+        config = server.resolve_vision(env)
+        self.assertEqual(config['model'], 'qwen-vl-max')
+        self.assertEqual(config['api_url'], 'https://example.com/v1/chat/completions')
+
+    def test_forced_switch_reuses_selected_provider(self):
+        env = {'LLM_PROVIDER': 'deepseek', 'DEEPSEEK_API_KEY': 'sk-demo',
+               'VISION_ENABLED': 'true'}
+        self.assertTrue(server.vision_available(env))
+        self.assertIsNone(server.resolve_vision({'LLM_PROVIDER': 'deepseek',
+                                                 'VISION_ENABLED': 'true'}))
+
+    def test_blank_dedicated_key_is_not_a_vision_config(self):
+        env = {'LLM_PROVIDER': 'deepseek', 'DEEPSEEK_API_KEY': 'sk-demo',
+               'VISION_API_KEY': '   '}
+        self.assertIsNone(server.resolve_vision(env))
 
 
 if __name__ == '__main__':

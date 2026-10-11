@@ -111,7 +111,6 @@ def rule_extract(query, campus=None, known_names=None) -> list:
             if index < 0:
                 break
             start = index + len(suffix)
-            end = index + len(suffix)
             name = _cut_left_window(text, index) + suffix
             name = name.strip()
             key = normalize_key(name)

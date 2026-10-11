@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 import requests
 
 from .boundary import CampusMembershipEvaluator, membership_evidence
+from .outbound import direct_proxies, system_proxies
 
 
 @dataclass(frozen=True)
@@ -224,7 +225,10 @@ class AmapPoiHarvester:
         self._last_request_started: float | None = None
 
     def _request_json(self, params: dict) -> dict:
-        response = requests.get(self.endpoint, params=params, timeout=self.timeout)
+        # 高德是国内域名，必须显式直连：否则会被 Windows 系统代理（Clash 等）带成 ProxyError，
+        # 表现为"13 个关键词全部重试失败"，却看起来像高德没有数据。
+        response = requests.get(self.endpoint, params=params, timeout=self.timeout,
+                                proxies=direct_proxies())
         response.raise_for_status()
         return response.json()
 
@@ -516,9 +520,11 @@ class PublicWebHarvester:
         return url
 
     def _fetch(self, url: str) -> bytes:
+        # 公开网页的域名不确定（国内外都可能），因此默认沿用系统代理设置；
+        # 需要固定时用 WEB_HTTP_PROXY 显式指定。
         response = requests.get(url, timeout=self.timeout, allow_redirects=False,
                                 headers={"User-Agent": "CampusAssetResearch/1.0"},
-                                stream=True)
+                                proxies=system_proxies(), stream=True)
         if 300 <= response.status_code < 400:
             raise ValueError("redirects are not followed; provide the final public URL")
         response.raise_for_status()

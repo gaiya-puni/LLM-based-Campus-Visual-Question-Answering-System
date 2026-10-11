@@ -145,6 +145,11 @@
             <el-option v-for="season in seasons" :key="season.id" :label="season.name" :value="season.id" />
           </el-select>
         </div>
+        <div v-if="previewReady" class="map-legend">
+          <div class="legend-bar" :style="{ background: rampCss }"></div>
+          <div class="legend-labels"><span>相对较低</span><span>相对较高</span></div>
+          <p class="legend-note">仅在同一校区、同一场景内比较；边界为数据覆盖范围，通行情况未核实。</p>
+        </div>
         <p v-if="!previewReady" class="map-hint">已通过地点 {{ review.approved.length }} 个；新候选通过后即可生成隔离热图预览。</p>
         <p v-else class="map-hint preview-success">临时热图已生成，待审核标记已隐藏，可切换场景和季节查看。</p>
         <p v-if="publishPlan" class="publish-hint">正式发布预览：植物新增 {{ publishPlan.plantAdded.length }} / 修改 {{ publishPlan.plantUpdated.length }}，场景新增 {{ publishPlan.sceneAdded.length }} / 修改 {{ publishPlan.sceneUpdated.length }}；发布后需重建索引和热图缓存。</p>
@@ -227,6 +232,14 @@ import {
   type BuildJob, type CandidatePoi, type ReviewBundle, type ReviewStatus, type PublishPlan,
 } from '../api/campusBuild';
 import { getReviewToken, setReviewToken } from '../api/userdata';
+import {
+  HEATMAP_LAYER_OPACITY,
+  heatmapRampCss,
+  renderHeatmapCanvas,
+} from '../components/heatmapRender';
+
+/** 与栅格同源的图例色带（此前这个页面没有任何图例，颜色含义无从得知）。 */
+const rampCss = heatmapRampCss();
 
 const query = ref('');
 const webUrlsText = ref('');
@@ -546,12 +559,10 @@ const loadPreview = async () => {
     if (!grid || grid.values.length !== grid.width * grid.height || grid.rowOrder !== 'north_to_south') {
       throw new Error('热力网格格式不正确');
     }
-    const canvas = document.createElement('canvas'); canvas.width = grid.width; canvas.height = grid.height;
-    const ctx = canvas.getContext('2d'); if (!ctx) return;
-    const image = ctx.createImageData(grid.width, grid.height);
-    grid.values.forEach((value: number, index: number) => { if (value === grid.noData) return; const t = Math.max(0, Math.min(1, value / grid.maxValue)); image.data[index * 4] = Math.round(41 + 174 * t); image.data[index * 4 + 1] = Math.round(103 + 40 * (1 - t)); image.data[index * 4 + 2] = Math.round(195 - 150 * t); image.data[index * 4 + 3] = Math.round(70 + 150 * t); });
-    ctx.putImageData(image, 0, 0); clearHeatmap();
-    const AMap = (window as any).AMap; heatLayer = new AMap.ImageLayer({ url: canvas.toDataURL('image/png'), bounds: grid.bounds, zooms: [3, 22], opacity: 0.58, zIndex: 80 }); map.add(heatLayer);
+    const canvas = renderHeatmapCanvas(grid);
+    if (!canvas) throw new Error('当前浏览器不支持热力图渲染');
+    clearHeatmap();
+    const AMap = (window as any).AMap; heatLayer = new AMap.ImageLayer({ url: canvas.toDataURL('image/png'), bounds: grid.bounds, zooms: [3, 22], opacity: HEATMAP_LAYER_OPACITY, zIndex: 80 }); map.add(heatLayer);
   } catch (err) { error.value = err instanceof Error ? err.message : '预览读取失败'; }
 };
 onMounted(initMap);
@@ -584,6 +595,11 @@ onBeforeUnmount(() => { if (timer) window.clearInterval(timer); clearMarkers(); 
 .candidate-item { padding: 11px 10px; margin: 8px 0; border: 1px solid #ebeef5; border-left: 4px solid #e6a23c; border-radius: 9px; cursor: pointer; transition: .15s; } .candidate-item:hover, .candidate-item.selected { background: #fff8f1; border-color: #e6a23c; } .candidate-item.approved { border-left-color: #67c23a; } .candidate-item.rejected { border-left-color: #909399; opacity: .7; } .candidate-title { display: flex; justify-content: space-between; gap: 8px; } .candidate-item p, .candidate-meta { color: #909399; font-size: 12px; margin-top: 5px; } .candidate-meta { display: flex; justify-content: space-between; }
 .map-panel { position: relative; min-width: 0; min-height: 560px; padding: 0; overflow: hidden; } .map { width: 100%; height: 100%; min-height: 560px; } .map-toolbar { position: absolute; z-index: 3; left: 12px; right: 12px; top: 12px; flex-wrap: wrap; width: fit-content; max-width: calc(100% - 24px); box-sizing: border-box; padding: 8px; border-radius: 9px; background: rgba(255,255,255,.95); box-shadow: 0 3px 12px #0002; } .map-hint { position: absolute; left: 12px; right: 12px; bottom: 12px; width: fit-content; max-width: calc(100% - 24px); box-sizing: border-box; padding: 7px 10px; background: rgba(255,255,255,.92); color: #909399; font-size: 12px; border-radius: 7px; }
 .preview-success { color: #529b2e; } .publish-hint { position: absolute; left: 12px; bottom: 44px; padding: 7px 10px; background: rgba(255,248,230,.95); color: #b88230; font-size: 12px; border-radius: 7px; }
+/* 临时热图图例：颜色含义此前无从得知，这里补齐（渐变与栅格同源）。 */
+.map-legend { position: absolute; right: 12px; bottom: 12px; z-index: 3; width: min(240px, 46%); box-sizing: border-box; padding: 8px 10px; border-radius: 8px; background: rgba(255,255,255,.94); box-shadow: 0 3px 12px #0002; }
+.legend-bar { height: 9px; border-radius: 4px; }
+.legend-labels { display: flex; justify-content: space-between; margin-top: 4px; color: #606266; font-size: 11px; }
+.legend-note { margin: 6px 0 0; color: #909399; font-size: 11px; line-height: 1.4; }
 .empty { padding: 40px 10px; text-align: center; color: #909399; font-size: 13px; } .coord-fields { display: flex; gap: 10px; } .coord-fields .el-form-item { flex: 1; }
 .quality-review { margin-top: 2px; padding: 12px; border: 1px solid #ebeef5; border-radius: 9px; background: #fafafa; } .quality-heading { display: flex; align-items: center; justify-content: space-between; color: #303133; font-size: 13px; } .quality-heading span { color: #606266; font-variant-numeric: tabular-nums; } .score-group { margin-top: 10px; } .score-group-title { margin-bottom: 7px; color: #909399; font-size: 12px; } .risk-group { padding-top: 9px; border-top: 1px dashed #dcdfe6; } .score-row { display: grid; grid-template-columns: 94px minmax(80px, 1fr) 32px; align-items: center; gap: 8px; margin: 7px 0; color: #606266; font-size: 12px; } .score-row b { text-align: right; color: #606266; font-size: 12px; font-variant-numeric: tabular-nums; } .legacy-quality { margin-top: 9px; color: #909399; font-size: 12px; } .confidence-reasons { margin-top: 12px; padding-top: 10px; border-top: 1px dashed #dcdfe6; color: #606266; font-size: 12px; } .confidence-reasons ul { margin: 7px 0 0; padding-left: 18px; } .confidence-reasons li { margin: 4px 0; line-height: 1.45; } .confidence-reasons p { margin-top: 7px; color: #909399; line-height: 1.45; }
 .evidence { border-top: 1px solid #ebeef5; padding-top: 12px; } .evidence div { margin: 8px 0; } .evidence dt { color: #909399; font-size: 12px; } .evidence dd { margin: 3px 0; color: #606266; font-size: 13px; line-height: 1.5; word-break: break-word; } .drawer-actions { justify-content: flex-end; margin-top: 22px; }

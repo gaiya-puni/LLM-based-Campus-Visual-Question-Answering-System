@@ -43,6 +43,97 @@ class HeatmapMathTests(unittest.TestCase):
         self.assertGreater(h[0], 0)
         self.assertLessEqual(h[0], self.config['maxInfluenceMeters'] / 3)
 
+    def test_knn_bandwidth_keeps_dense_broader_direction(self):
+        """β>0：越密 → 带宽越大（项目既有语义，必须保持）。"""
+        config = dict(self.config, adaptiveBandwidth={
+            'method': 'knn-density', 'neighbourK': 2, 'densityExponent': 1.0})
+        xy = np.array([[0., 0.], [10., 0.], [400., 0.]])
+        h = hm.class_bandwidth(xy, np.array([0., 0.]), config)
+        self.assertEqual(h[0], h[1])
+        self.assertGreaterEqual(h[0], h[2])
+        self.assertTrue(np.isfinite(h).all())
+        self.assertGreater(h.min(), 0)
+        self.assertLessEqual(h.max(), config['maxInfluenceMeters'] / 3)
+
+    def test_negative_exponent_reproduces_textbook_abramson_direction(self):
+        """β<0：越密 → 带宽越小（教科书 Abramson 方向，可复现即可，不作为默认）。"""
+        config = dict(self.config, adaptiveBandwidth={
+            'method': 'knn-density', 'neighbourK': 2, 'densityExponent': -1.0})
+        xy = np.array([[0., 0.], [10., 0.], [400., 0.]])
+        h = hm.class_bandwidth(xy, np.array([0., 0.]), config)
+        self.assertLessEqual(h[0], h[2])
+
+    def test_zero_exponent_degrades_to_fixed_bandwidth(self):
+        """β=0 必须精确退化为固定带宽，用作评测对照。"""
+        config = dict(self.config, adaptiveBandwidth={
+            'method': 'knn-density', 'neighbourK': 2, 'densityExponent': 0.0})
+        xy = np.array([[0., 0.], [10., 0.], [120., 0.], [400., 0.], [900., 40.]])
+        h = hm.class_bandwidth(xy, np.array([0., 0.]), config)
+        self.assertEqual(h.max() - h.min(), 0.0)
+
+    def test_duplicate_points_keep_bandwidth_finite(self):
+        """重复坐标点位会让 k 近邻距离为 0，带宽仍须有限且非零。"""
+        config = dict(self.config, adaptiveBandwidth={
+            'method': 'knn-density', 'neighbourK': 4, 'densityExponent': 1.0})
+        xy = np.array([[5., 5.], [5., 5.], [5., 5.], [300., 0.], [600., 0.]])
+        h = hm.class_bandwidth(xy, np.array([0., 0.]), config)
+        self.assertTrue(np.isfinite(h).all())
+        self.assertTrue((h > 0).all())
+        self.assertLessEqual(h.max(), config['maxInfluenceMeters'] / 3)
+
+    def test_unknown_method_falls_back_to_legacy(self):
+        """配置写错（未知 method / 缺字段）时必须回退旧规则而不是抛异常。"""
+        legacy = dict(self.config, adaptiveBandwidth={'method': 'legacy'})
+        broken = dict(self.config, adaptiveBandwidth={'method': 'no-such-method'})
+        missing = {key: value for key, value in self.config.items() if key != 'adaptiveBandwidth'}
+        xy = np.array([[0., 0.], [10., 0.], [400., 0.]])
+        expected = hm.class_bandwidth(xy, np.array([0., 0.]), legacy)
+        for config in (broken, missing):
+            np.testing.assert_array_equal(hm.class_bandwidth(xy, np.array([0., 0.]), config), expected)
+
+    def test_invalid_adaptive_config_is_rejected(self):
+        """非法自适应配置必须在加载阶段就被拒绝，而不是算出奇怪的带宽。"""
+        raw = json.loads((BASE / 'heatmap_config.json').read_text(encoding='utf-8'))
+        for block in ({'method': 'knn-density', 'neighbourK': 0},
+                      {'method': 'knn-density', 'neighbourK': '4'},
+                      {'method': 'knn-density', 'densityExponent': 99},
+                      {'method': 'unknown-method'},
+                      'not-an-object'):
+            with self.subTest(block=block):
+                with tempfile.TemporaryDirectory() as tmp:
+                    broken = dict(raw, adaptiveBandwidth=block)
+                    Path(tmp, 'heatmap_config.json').write_text(
+                        json.dumps(broken, ensure_ascii=False), encoding='utf-8')
+                    with self.assertRaises(ValueError):
+                        hm.load_config(Path(tmp))
+
+    def test_adaptive_bandwidth_preserves_group_scale(self):
+        """尺度保持：升级只改"组内分布"，组内几何均值必须与旧规则一致。
+
+        这是本轮最重要的不变量——没有人工标注时，"不制造尺度漂移"就是可验证的验收标准。
+        """
+        config = dict(self.config, adaptiveBandwidth={
+            'method': 'knn-density', 'neighbourK': 4, 'densityExponent': 1.0})
+        legacy_config = dict(self.config, adaptiveBandwidth={'method': 'legacy'})
+        generator = np.random.default_rng(20261010)
+        xy = np.vstack([
+            generator.normal(loc=[0, 0], scale=25, size=(40, 2)),
+            generator.normal(loc=[260, 40], scale=90, size=(12, 2)),
+            np.array([[500., 0.], [505., 5.]]),
+        ])
+        legacy = hm.class_bandwidth(xy, np.zeros(2), legacy_config)
+        upgraded = hm.class_bandwidth(xy, np.zeros(2), config)
+        geometric_mean = lambda values: float(np.exp(np.mean(np.log(values))))  # noqa: E731
+        # 容差 5%：伸缩后若较多点被钳到 [minInfluence, maxInfluence] 区间边界，
+        # 几何均值无法完全精确保持；5% 以内的漂移不会改变热力场的整体量级。
+        reference = geometric_mean(legacy)
+        self.assertAlmostEqual(geometric_mean(upgraded), reference, delta=0.05 * reference)
+        self.assertLessEqual(float(upgraded.max()), self.config['maxInfluenceMeters'] / 3)
+        self.assertGreaterEqual(float(upgraded.min()), self.config['minInfluenceMeters'] / 3)
+        # 组内分布确实变得更分散（旧规则的自适应项几乎失效）。
+        self.assertGreater(float(upgraded.max() - upgraded.min()),
+                           float(legacy.max() - legacy.min()))
+
     def test_annd_and_relative_abundance(self):
         xy = np.array([[0., 0.], [10., 0.], [400., 0.]])
         h = hm.class_bandwidth(xy, np.array([0., 0.]), self.config)

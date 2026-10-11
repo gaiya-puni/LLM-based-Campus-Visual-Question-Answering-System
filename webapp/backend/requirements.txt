@@ -1,9 +1,15 @@
-Flask>=3.0.0
-Flask-Cors>=4.0.0
-Flask-Login>=0.6.3
-python-dotenv>=1.0.1
-PyMySQL>=1.1.0
-requests>=2.31.0
-Werkzeug>=3.0.0
-numpy>=1.26.0
-sentence-transformers>=3.0.0
+# 后端运行时依赖。
+#
+# 版本已按本机（Python 3.10）验证过的组合锁定，便于复现；升级时请连同测试一起验证后
+# 再修改这里的版本号，不要退回 `>=` 写法。
+Flask==3.1.3
+Flask-Cors==6.0.5
+Flask-Login==0.6.3
+python-dotenv==1.2.2
+PyMySQL==1.2.0
+requests==2.34.2
+Werkzeug==3.1.8
+numpy==1.26.4
+# 句向量检索（可选）：体积较大（含 torch）。缺失时后端会自动回退关键词规则，
+# 需要重建/使用语义索引时再安装。
+sentence-transformers==6.0.1

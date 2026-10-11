@@ -52,3 +52,16 @@ webapp/frontend/build/
 *.njsproj
 *.sln
 *.sw?
+
+# 代码助手 / 本地工具产物（仅本机，不入库）
+.codebuddy/
+.playwright-cli/
+
+# 测试与静态检查缓存
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+.coverage.*
+

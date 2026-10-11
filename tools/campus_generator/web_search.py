@@ -18,6 +18,7 @@ from urllib.parse import SplitResult, urlsplit, urlunsplit
 import requests
 
 from .harvest import HarvestCache
+from .outbound import system_proxies
 
 
 BRAVE_ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
@@ -159,6 +160,9 @@ class WebSearchClient:
         return _PROVIDER_ENV_VARS[self.provider]
 
     def _request_json(self, payload: dict) -> dict:
+        # Tavily / Brave 都是境外服务，默认沿用系统代理设置（受限网络下往往必须走代理）；
+        # 需要固定时用 WEB_HTTP_PROXY 显式指定。
+        proxies = system_proxies()
         if self.provider == "brave":
             response = requests.get(
                 BRAVE_ENDPOINT,
@@ -169,6 +173,7 @@ class WebSearchClient:
                     "User-Agent": "CampusAssetResearch/1.0",
                 },
                 timeout=self.timeout,
+                proxies=proxies,
             )
         else:
             response = requests.post(
@@ -181,6 +186,7 @@ class WebSearchClient:
                     "User-Agent": "CampusAssetResearch/1.0",
                 },
                 timeout=self.timeout,
+                proxies=proxies,
             )
         response.raise_for_status()
         result = response.json()

@@ -57,7 +57,18 @@
             <img v-else src="@/assets/ecnu-logo.png" class="avatar-img" alt="ECNU" />
           </div>
           <div :class="['message-bubble', msg.type === 'user' ? 'user-bubble' : 'bot-bubble']">
-            <p v-if="msg.type === 'user'">{{ msg.content }}</p>
+            <div v-if="msg.type === 'user'">
+              <div v-if="msg.images?.length" class="message-images">
+                <img
+                  v-for="(src, index) in msg.images"
+                  :key="index"
+                  :src="src"
+                  class="message-image"
+                  alt="随消息上传的图片"
+                />
+              </div>
+              <p>{{ msg.content }}</p>
+            </div>
             <p v-else v-html="parseMarkdown(msg.content)"></p>
             <div v-if="msg.type === 'bot' && msg.unsupported" class="place-report-prompt">
               <div>
@@ -91,12 +102,63 @@
         </div>
       </div>
 
-      <!-- 输入区域 -->
-      <div class="chat-input-area">
+      <!-- 输入区域：支持点击选择 / 拖拽 / 直接粘贴 / 移动端拍照 -->
+      <div
+        class="chat-input-area"
+        :class="{ 'is-dragging': isDragging }"
+        @dragover.prevent="onDragOver"
+        @dragleave.prevent="isDragging = false"
+        @drop.prevent="onDrop"
+        @paste="onPaste"
+      >
+        <div v-if="attachments.length || attachmentNotice" class="attachment-strip">
+          <div v-for="item in attachments" :key="item.id" class="attachment-chip">
+            <img :src="item.dataUrl" class="attachment-thumb" :alt="item.name" />
+            <span class="attachment-meta">{{ item.sizeLabel }}</span>
+            <button
+              type="button"
+              class="attachment-remove"
+              title="移除这张图片"
+              @click="removeAttachment(item.id)"
+            >×</button>
+          </div>
+          <span v-if="attachmentNotice" class="attachment-notice">{{ attachmentNotice }}</span>
+          <span v-else-if="!visionAvailable" class="attachment-notice warn">
+            本部署未启用图片理解，图片将无法被识别，建议直接用文字描述地点
+          </span>
+        </div>
         <div class="input-wrapper">
+          <input
+            ref="fileInput"
+            type="file"
+            :accept="IMAGE_ACCEPT"
+            multiple
+            hidden
+            @change="onFilePicked"
+          />
+          <input
+            ref="cameraInput"
+            type="file"
+            accept="image/*"
+            capture="environment"
+            hidden
+            @change="onFilePicked"
+          />
+          <el-button
+            class="attach-btn"
+            :disabled="isLoading || attachments.length >= MAX_ATTACHMENTS"
+            title="添加图片（也可直接拖入或粘贴，最多 2 张）"
+            @click="openFilePicker"
+          >🖼️</el-button>
+          <el-button
+            class="attach-btn"
+            :disabled="isLoading || attachments.length >= MAX_ATTACHMENTS"
+            title="拍照并识别图中地点"
+            @click="openCamera"
+          >📷</el-button>
           <el-input
             v-model="inputMessage"
-            placeholder="输入您的问题..."
+            placeholder="输入您的问题，或上传一张校园照片问「这是哪儿」"
             class="input-field"
             @keyup.enter="sendMessage(inputMessage)"
             :disabled="isLoading"
@@ -105,7 +167,7 @@
               <el-button
                 type="primary"
                 @click="sendMessage(inputMessage)"
-                :disabled="!inputMessage.trim() || isLoading"
+                :disabled="(!inputMessage.trim() && !attachments.length) || isLoading"
                 class="send-btn"
               >发送</el-button>
             </template>
@@ -133,6 +195,13 @@ import PlaceReportDialog from '../components/PlaceReportDialog.vue';
 import type { HeatmapPayload } from '../components/sceneHeatmapTypes';
 import type { ItineraryPayload, ItineraryStop } from '../components/itineraryTypes';
 import type { FeedbackRating } from '../api/userdata';
+import {
+  MAX_ATTACHMENTS,
+  buildAttachments,
+  payloadForRequest,
+  pickImageFiles,
+  type ImageAttachment,
+} from '../components/imageAttach';
 import { loadAMap } from '../amap';
 import {
   CAMPUSES,
@@ -158,6 +227,8 @@ interface Message {
   campus?: string;
   unsupported?: boolean;
   rating?: FeedbackRating | null;
+  /** 该轮随消息上传的图片（仅用于回显，历史轮次不会重发给后端）。 */
+  images?: string[];
 }
 interface Location {
   name: string;
@@ -203,6 +274,14 @@ const heatmapResponse = shallowRef<HeatmapPayload | null>(null);
 const itineraryResponse = shallowRef<ItineraryPayload | null>(null);
 const placeReportOpen = ref(false);
 const placeReportContext = ref({ query: '', campus: '' });
+// ---- 图片附件（见 components/imageAttach.ts；口径与后端同源）----
+const attachments = ref<ImageAttachment[]>([]);
+const attachmentNotice = ref('');
+const isDragging = ref(false);
+/** 后端 `/api/health` 的 vision 字段；未配置视觉模型时给出明确提示而不是让用户白等。 */
+const visionAvailable = ref(true);
+const fileInput = ref<HTMLInputElement | null>(null);
+const cameraInput = ref<HTMLInputElement | null>(null);
 // 行程面板必须与地图保持一致：切到别的校区时该行程的标记已被过滤掉，面板也不应再显示。
 // 只做显示层过滤、不清数据，切回原校区即自动恢复。
 const visibleItinerary = computed(() =>
@@ -621,6 +700,14 @@ const navigateTo = (destLng: number, destLat: number) => {
 };
 
 onMounted(() => {
+  // 探测本部署是否启用图片理解：只影响提示文案，不阻断上传（换了 .env 不必刷新即可试）。
+  fetch('/api/health')
+    .then((response) => (response.ok ? response.json() : null))
+    .then((payload) => {
+      if (payload && typeof payload.vision === 'boolean') visionAvailable.value = payload.vision;
+    })
+    .catch(() => { /* 后端没起来时保持默认，发送时会走"未连接后端"的提示 */ });
+
   nextTick(async () => {
     try {
       await loadAMap();
@@ -643,6 +730,59 @@ onUnmounted(() => {
 });
 
 const CHAT_API_URL = '/api/chat';
+
+/** 后端返回了明确原因（图片超限、格式不支持等）时用它区分"未连接后端"。 */
+class ChatRequestError extends Error {}
+/** 与 imageAttach.ALLOWED_MIMES 对应（这里写成 accept 字符串给 file input 用）。 */
+const IMAGE_ACCEPT = 'image/jpeg,image/png,image/webp';
+
+/**
+ * 把一批文件收进附件栏：过滤非图片 → 本地压缩 → 逐张校验体积/张数。
+ * 失败时给出**可操作的中文提示**，而不是静默丢弃。
+ */
+const applyFiles = async (files: File[]) => {
+  const images = pickImageFiles(files);
+  if (!images.length) {
+    attachmentNotice.value = '只支持 JPG / PNG / WebP 图片';
+    return;
+  }
+  attachmentNotice.value = '';
+  const outcome = await buildAttachments(images, attachments.value.length);
+  if (outcome.items.length) {
+    attachments.value = [...attachments.value, ...outcome.items];
+  }
+  attachmentNotice.value = outcome.error || outcome.notice;
+};
+
+const openFilePicker = () => fileInput.value?.click();
+const openCamera = () => cameraInput.value?.click();
+
+const onFilePicked = async (event: Event) => {
+  const input = event.target as HTMLInputElement;
+  await applyFiles(Array.from(input.files || []));
+  // 清空 value：否则连续选择同一张图不会触发 change
+  input.value = '';
+};
+
+const onDragOver = () => { isDragging.value = true; };
+
+const onDrop = async (event: DragEvent) => {
+  isDragging.value = false;
+  await applyFiles(Array.from(event.dataTransfer?.files || []));
+};
+
+/** 只在输入区聚焦时生效（监听挂在输入区容器上，不影响页面其它复制粘贴）。 */
+const onPaste = async (event: ClipboardEvent) => {
+  const files = Array.from(event.clipboardData?.files || []);
+  if (!files.length) return;
+  event.preventDefault();
+  await applyFiles(files);
+};
+
+const removeAttachment = (id: string) => {
+  attachments.value = attachments.value.filter((item) => item.id !== id);
+  attachmentNotice.value = '';
+};
 const getCurrentTime = (now = new Date()) => {
   return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
 };
@@ -696,11 +836,18 @@ const openPlaceReport = (message: Message) => {
 
 const sendMessage = async (content: string) => {
   const query = content.trim();
-  if (!query || isLoading.value) return;
+  const pending = attachments.value.slice();
+  // 允许"只发图不发字"：图片本身就是问题（这是哪儿）。
+  if ((!query && !pending.length) || isLoading.value) return;
+  const outgoing = query || '请看这张图片，这是校园里的哪儿？';
   heatmapResponse.value = null;
   heatmapReset.value++;
-  messages.value.push(createMessage('user', query));
+  messages.value.push(
+    createMessage('user', outgoing, pending.length ? { images: pending.map(i => i.dataUrl) } : {}),
+  );
   inputMessage.value = '';
+  attachments.value = [];
+  attachmentNotice.value = '';
   isLoading.value = true;
   await nextTick();
   scrollToBottom();
@@ -722,10 +869,25 @@ const sendMessage = async (content: string) => {
         })),
         userCampus: activeCampus.value,
         userLocation: requestLocation,
-        recommendationMode: recommendationMode.value
+        recommendationMode: recommendationMode.value,
+        // 附件只随本轮发出；历史轮次不回传 base64（后端也只并入最后一条用户消息）。
+        ...(pending.length ? { attachments: payloadForRequest(pending) } : {}),
       })
     });
-    if (!response.ok) throw new Error(`API请求失败: ${response.status}`);
+    if (!response.ok) {
+      // 后端对图片链路会回明确的中文原因（张数/类型/体积/请求体超限），优先展示它，
+      // 否则用户只会看到一句没有信息量的"请求失败"。
+      let detail = '';
+      try {
+        const payload = await response.json();
+        detail = String(payload?.error || payload?.message || '');
+      } catch { /* 非 JSON 响应：例如网关直接返回的 HTML 错误页 */ }
+      if (!detail && response.status === 413) {
+        detail = '图片过大，请压缩后重试（单张不超过 4MB，最多 2 张）';
+      }
+      if (detail) throw new ChatRequestError(detail);
+      throw new Error(`API请求失败: ${response.status}`);
+    }
     const data = await response.json();
     const botMessage = createMessage(
       'bot',
@@ -777,10 +939,16 @@ const sendMessage = async (content: string) => {
     if (data.itinerary_status) {
       botMessage.content += `\n\n> 行程提示：${data.itinerary_status}。`;
     }
-  } catch {
+  } catch (error) {
+    // 失败时把附件放回输入栏，用户不必重新选一遍图。
+    if (pending.length && !attachments.value.length) {
+      attachments.value = pending;
+    }
     messages.value.push(createMessage(
       'bot',
-      '当前是本地演示模式，未连接后端智能问答服务。您仍可浏览植物图鉴、地图页面和静态可视化成果；如需体验完整问答，请按源码包说明启动 Flask 后端。',
+      error instanceof ChatRequestError
+        ? `❌ ${error.message}`
+        : '当前是本地演示模式，未连接后端智能问答服务。您仍可浏览植物图鉴、地图页面和静态可视化成果；如需体验完整问答，请按源码包说明启动 Flask 后端。',
     ));
   } finally {
     isLoading.value = false;
@@ -1126,6 +1294,30 @@ const scrollToBottom = () => {
   border-top: 1px solid #eee;
   flex-shrink: 0;
 
+  &.is-dragging {
+    background: #fff5f5;
+    outline: 2px dashed #c20a1c;
+    outline-offset: -6px;
+  }
+
+  .input-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .attach-btn {
+    flex-shrink: 0;
+    padding: 8px 10px;
+    font-size: 16px;
+    line-height: 1;
+    color: #c20a1c;
+    border-color: #ffcdd2;
+    background: #fff5f5;
+
+    &:disabled { color: #c0c4cc; background: #f7f7f7; }
+  }
+
   .send-btn {
     background: linear-gradient(135deg, #c20a1c 0%, #a50918 100%);
     border: none;
@@ -1133,6 +1325,74 @@ const scrollToBottom = () => {
 
     &:disabled { background: #ccc; }
   }
+}
+
+/* 附件预览条：缩略图 + 体积 + 单张移除；提示文案与图片同一行 */
+.attachment-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.attachment-chip {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 4px;
+  border: 1px solid #ffe0e0;
+  border-radius: 8px;
+  background: #fff9f9;
+}
+
+.attachment-thumb {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 6px;
+  display: block;
+}
+
+.attachment-meta {
+  font-size: 12px;
+  color: #909399;
+}
+
+.attachment-remove {
+  border: none;
+  background: transparent;
+  color: #c20a1c;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+
+  &:hover { color: #8f0714; }
+}
+
+.attachment-notice {
+  font-size: 12px;
+  color: #e6a23c;
+
+  &.warn { color: #c20a1c; }
+}
+
+/* 用户气泡里的图片：只做回显，不重发 */
+.message-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.message-image {
+  width: 96px;
+  max-height: 96px;
+  object-fit: cover;
+  border-radius: 8px;
+  display: block;
 }
 
 .chat-messages::-webkit-scrollbar { width: 5px; }
