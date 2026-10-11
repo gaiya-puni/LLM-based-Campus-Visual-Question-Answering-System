@@ -1,7 +1,8 @@
 # 项目进度说明（汇报用）
 
 > 面向助教的进度汇报：技术栈、已完成功能、如何运行、测试与质量、当前进展与下一步。
-> 文档更新日期：**2026-10-10**（本轮：后端入口模块化、图片问答链路补全、路由测试与 CI、文档纠偏）
+> 文档更新日期：**2026-10-11**（本轮：后端入口模块化、图片问答链路补全、路由测试与 CI、文档纠偏；
+> 同日续修：依赖高危漏洞、CI 在无凭据/LF 检出环境下的两类失败）
 
 ---
 
@@ -157,6 +158,7 @@ python evaluate_semantic_queries.py --strict   # 离线评测集
 | `python -m ruff check .`（静态检查，本轮新增） | **All checks passed** |
 | `test_outbound`（本轮新增：出站代理策略与真实调用点，守住"直连必须写成 `{http:None,https:None}`"） | **9 个用例 通过** |
 | 全仓回归 `python -m pytest -q` | **400 passed / 1 skipped** |
+| 同上，但按 **CI 条件**复跑（无 `.env`、统一 LF 检出、只装 `requirements-ci.txt`） | **400 passed / 1 skipped**（修复前为 20 failed） |
 
 提交前还会跑仓库自带的脱敏检查，防止密钥入库：
 
@@ -248,6 +250,21 @@ python scripts/check_publication.py
    有效格覆盖占比**完全不变**（0.5817），场景区分度**无退化**（相关系数均值 0.687 → 0.686）。
    `heatmap_config.json` 的 `adaptiveBandwidth.method` 可在 `knn-density` / `legacy` 之间切换，
    **已实测 legacy 模式与改动前逐点一致（Top-1 变化 0/26）**，回退路径可用。
+8. **依赖高危漏洞修复（同日追加）** —— `Security check` 因新披露的安全公告变红（挂掉的是
+   `npm audit --omit=dev --audit-level=high`，退出 1，命中 3 个 high）：`vue` 3.5.33→3.5.43
+   （属性名黑名单缺 CR 导致 XSS）、`dompurify` 3.4.15→3.4.16（`IN_PLACE` 清理后残留事件处理器
+   导致 DOM XSS）、`source-map-js` 1.2.1→1.2.2（索引式 source-map 造成事件循环 DoS）。
+   三者的修复版本都落在 `package.json` 的声明范围内，因此**只动 `package-lock.json`**。
+9. **CI 稳定性修复（同日追加）** —— 新增的 pytest CI 第一次在「无凭据 + LF 检出」环境里跑，
+   暴露出两类**早已存在、只是从未在 CI 里跑过**的问题：
+   ① **18 个测试隐式依赖本机 `.env`**：`resolve_llm()` 读不到密钥即返回 `None`，`/api/chat`
+   直接走 503「AI 服务尚未配置」→ 这些测试只在"配了 `.env`"的机器上才是绿的。修法是新增仓库
+   根目录 `conftest.py`，在 `pytest_configure` 阶段用 `setdefault` 补一组**占位**配置；
+   ② **2 个指纹测试对行尾敏感**：`core.autocrlf=true` 且无 `.gitattributes`，Windows 工作区是 CRLF、
+   CI 检出是 LF，而 `semantic_source_hash()` / `scene_heatmaps.fingerprint()` 都用 `read_bytes()`
+   原始字节（`campus_pois.json` 一个文件就差 139,213 个 `\r`）。修法是新增
+   `semantic_retrieval.canonical_source_bytes()`（读取时 CRLF→LF），并刷新 28 个热图缓存与
+   `semantic_index_meta.json` 的存量哈希。排查与复现步骤见 `HANDOVER.md` §12。
 
 **下一步**：浏览器端三校区端到端验收；按
 [`docs/FEATURE_FEASIBILITY.md`](docs/FEATURE_FEASIBILITY.md) 的优先级推进。

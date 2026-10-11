@@ -39,6 +39,13 @@
 >    与 §11（热图 KDE 带宽算法升级）；
 >    并**更正**上一版本文档里"嵌入检索在本机崩溃 `0xC0000005`"的**误报**——复测模型加载正常、
 >    嵌入模式 `passed=50/50`、退出码 0。真正的评测短板是**现有 50 例对规则与嵌入两种后端都是满分**（无区分度）。
+> 8. **CI 真正跑起来后修的两件事（2026-10-11 追加）**：
+>    (a) 依赖高危漏洞（`vue` / `dompurify` / `source-map-js`）让 `Security check` 变红 → 升到
+>    `package.json` 声明范围内的补丁版，**只动 `package-lock.json`**；
+>    (b) 新增的 pytest CI 在「无凭据 + LF 检出」下暴露 **18 个测试隐式依赖本机 `.env`** 与
+>    **2 个指纹测试对行尾敏感** → 新增根目录 `conftest.py` 与
+>    `semantic_retrieval.canonical_source_bytes()`，并刷新 28 个热图缓存与索引元数据的存量哈希。
+>    **这三类坑别再踩，见 §12。**
 
 ---
 
@@ -610,6 +617,57 @@ h_i      = clip( h_target · (h_hi/h_lo)^(w_i − 0.5), h_lo, h_hi )
 `webapp/backend/test_scene_heatmaps.py` 新增 7 例：方向保持（β>0）、教科书方向可复现（β<0）、
 β=0 退化为固定带宽、重复坐标仍有限、未知 method 回退旧规则、非法配置在加载期被拒、
 以及**尺度保持**（组内几何均值漂移 ≤ 5%）。
+
+---
+
+## 12. CI 稳定性：三个别再踩的坑（2026-10-11 追加）
+
+### 12.1 为什么 CI 一开始是红的
+新增的 `.github/workflows/ci.yml`（`ruff check .` + `python -m pytest`）第一次把测试放进
+「**没有 `.env`** + **LF 检出**（Linux runner）」的环境，于是冒出 20 个失败——它们全靠"本地开发机的
+环境"才是绿的。**这不是新引入的 bug，而是长期被本机环境掩盖的测试缺陷。**
+
+| 类别 | 条数 | 现象 | 根因 |
+|---|---|---|---|
+| A | 18 | `assertEqual(503, 200)`，响应体 `{"error": "AI 服务尚未配置"}` | 测试隐式依赖本机 `.env` 里的密钥 |
+| B | 2 | `sourceHash` / 热图 `fingerprint` 不匹配 | 指纹对行尾敏感：Windows 是 CRLF、CI 是 LF |
+
+### 12.2 坑 1：测试不能"靠 `.env` 才算绿"
+- 修法：**仓库根目录 `conftest.py`**，在 `pytest_configure` 阶段用 `setdefault` 补一组占位配置
+  （`LLM_PROVIDER=deepseek`、`DEEPSEEK_API_KEY=placeholder-for-tests-not-a-real-key`）。
+- **不要删**。删掉后，任何没配 `.env` 的机器（含 CI 与下一位接手人）会立刻回到 18 个失败。
+- 占位值**故意不写成 `sk-xxxx` 形式**，否则会被 `scripts/check_publication.py` 的密钥规则误报。
+- 要测"未配置时会怎样"，请**显式传入 env 字典**（`resolve_llm({...})`，见 `test_llm_config.py`），
+  不要依赖进程环境"恰好没有这个变量"。
+
+### 12.3 坑 2：指纹/哈希一律走 `canonical_source_bytes()`
+- `core.autocrlf=true` 且仓库**没有 `.gitattributes`** → Windows 工作区 CRLF、CI 检出 LF。
+- 而 `campus_pois.json` 本身就是**被哈希的源文件之一**，光行尾就差 139,213 字节：
+  **任何让 `path.read_bytes()` 直接参与哈希的写法，都会使"索引/缓存是否过期"在 CI 里永远为真。**
+- 因此 `semantic_retrieval.semantic_source_hash()` 与 `scene_heatmaps.fingerprint()` 统一改用
+  `semantic_retrieval.canonical_source_bytes()`（读取时 CRLF→LF）。
+- ⚠️ **以后新增任何"把文件内容算进指纹"的逻辑，都必须用它**，不要退回 `read_bytes()`。
+- 改了被哈希的源文件（**包括 `scene_heatmaps.py` / `semantic_retrieval.py` / `build_scene_heatmaps.py`
+  自身**）或 `ALGORITHM_VERSION`，**必须重建缓存**，否则 `/api/heatmaps` 会报"缓存已过期"。
+
+### 12.4 坑 3：`requirements*.txt` 在 Windows 上会让 `pip install -r` 直接崩
+三个依赖文件都带**中文注释**却没有 PEP 263 编码声明，pip 在 GBK 区域设置下抛
+`UnicodeDecodeError: 'gbk' codec can't decode byte ...`（Linux 是 UTF-8，所以 CI 不暴露）。
+**尚未修复**；最省事的修法是在每个文件首行加 `# -*- coding: utf-8 -*-`，或临时设 `PYTHONUTF8=1`。
+
+### 12.5 怎么在本地复现 CI（很好用）
+```powershell
+# 1) 干净 venv，只装 CI 依赖（CI 故意不装 sentence-transformers：所有语义代码都是惰性导入，
+#    缺依赖时自动回退关键词规则，测试套件仍能完整跑通）
+python -m venv $env:TEMP\ci-venv
+& "$env:TEMP\ci-venv\Scripts\python.exe" -m pip install -r webapp/backend/requirements-ci.txt
+
+# 2) 重建「CI 检出后的内容」：按 git 跟踪清单复制、去掉 .env、把文本统一转成 LF。
+#    .env / node_modules / userdata 缓存 都不在检出里，造出来的环境天然干净。
+# 3) 用该 venv 跑 pytest —— 结果应与 GitHub 上一致（当前：400 passed / 1 skipped）。
+```
+另注：本机若开着系统代理，`pip` 可能报 `ValueError: check_hostname requires server_hostname`
+（注册表把 https 代理登记成了 `https://127.0.0.1:7897`）。PyPI 直连可用，加 `NO_PROXY=*` 绕过即可。
 
 ---
 
