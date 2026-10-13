@@ -21,7 +21,7 @@ class CampusConfigAssetTests(unittest.TestCase):
     def test_runtime_and_heatmap_configs_are_consistent(self):
         self.assertEqual(campus_config.check_consistency(), [])
 
-        runtime = campus_config.config()
+        campus_config.config()
         heatmap = json.loads(
             Path(campus_config.HEATMAP_CONFIG_PATH).read_text(encoding='utf-8'))
         self.assertEqual(set(heatmap['campuses']), set(campus_config.qa_campus_names()))
