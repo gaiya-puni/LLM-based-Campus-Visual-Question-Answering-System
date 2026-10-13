@@ -1,182 +1,303 @@
-# 🌱 LLM-based Campus Visual Question Answering System
+# LLM-based Campus Visual Question Answering System
 
-华东师范大学校园可视问答系统
+基于大模型、校园 POI 数据和高德地图的校园可视问答系统。项目当前覆盖华东师范大学普陀校区、华东师范大学闵行校区，以及用于资产生成和内部验证的上海交通大学闵行校区。
 
-最新交付说明：[2026-10-06 项目更新与体验指南](PROJECT_UPDATE_2026-10-06.md)
+系统把自然语言问答、地点检索、植物数据、场景热力图、图片地点识别、行程规划和用户共建数据汇总到一个 Vue + Flask 应用中，并保留了原有的静态数据可视化页面。
 
----
+## 功能概览
 
-## 🖥️ 如何查看
+- **校园智能问答**：查询植物、学院、食堂、停车场和校园地标，并在地图上标记结果。
+- **语义检索**：优先使用本地中文句向量索引；模型或索引不可用时自动回退到关键词检索。
+- **指哪问哪**：结合地图当前中心点回答“这个位置是什么”“我看到的地方在哪里”等问题。
+- **场景热力图**：支持赏花、拍照、散步休息、浪漫约会四类场景；运行时只读取离线缓存，不在线重建。
+- **图片问答**：可上传或粘贴图片，从路牌、楼名等可读文字中提取校园地点。需要单独配置视觉模型。
+- **一日行程规划**：确定性算法负责站点和顺序，大模型负责自然语言文案；大模型不可用时使用模板兜底。
+- **用户共建**：支持消息反馈、地点上报、未收录地点抽取、人工审核和导出。
+- **校园资产生成器**：从 JSON、高德 POI 和公开网页候选生成待审核校园资产包，发布前需要审核和确认。
+- **植物图鉴与寄语**：浏览植物数据、认养寄语和情感分析结果。
+- **静态可视化**：提供桑基图、旭日图、平行坐标轴和词云 HTML 页面。
 
-### 方式一：直接打开静态图表（无需安装任何环境）
+## 技术栈
 
-下载仓库后，用浏览器直接打开以下 HTML 文件：
+| 层次 | 技术 |
+| --- | --- |
+| 前端 | Vue 3、TypeScript、Vite、Element Plus、ECharts、Marked、DOMPurify |
+| 后端 | Python 3.10+、Flask、NumPy、PyMySQL |
+| 大模型 | OpenAI 兼容接口，可选 DeepSeek 或 ChatECNU |
+| 语义检索 | Sentence Transformers、`BAAI/bge-small-zh-v1.5`、NumPy |
+| 地图 | 高德地图 JavaScript API；高德 Web 服务仅用于后端采集/转换 |
+| 数据处理 | Python、Pandas、scikit-learn、Jupyter Notebook |
 
-| 图表 | 路径 | 内容 |
-|------|------|------|
-| 桑基图 | `visualization/charts/sankey/sankey.html` | 领养植物的学院 × 植物种类分布 |
-| 旭日图 | `visualization/charts/sunburst/sunburst-only.html` | 全校植物按科目、种类的层级分布 |
-| 平行坐标轴 | `visualization/charts/parallel/parallel.html` | 植物树高、胸径、冠幅等维度比较 |
-| 词云 | `visualization/wordcloud/res/exp.html` | 领养寄语词云 |
+## 快速启动
 
-### 方式二：运行 Vue 3 主网站（需要 Node.js 18+）
+### 1. 配置后端
 
-主网站包含交互式地图、植物图鉴、寄语浏览、领养预测等完整功能。
+在项目根目录执行：
 
-步骤1.开命令行开启后端
 ```powershell
 Copy-Item .env.example .env
-# 编辑 .env：选择大模型服务商（LLM_PROVIDER=deepseek 或 chatecnu）并填写 MySQL/讯飞配置
+```
+
+至少填写一个大模型服务商的密钥。默认配置为 DeepSeek：
+
+```dotenv
+LLM_PROVIDER=deepseek
+DEEPSEEK_API_KEY=你的密钥
+```
+
+也可以改用 ChatECNU：
+
+```dotenv
+LLM_PROVIDER=chatecnu
+CHATECNU_API_KEY=你的密钥
+```
+
+然后安装依赖并启动 Flask：
+
+```powershell
 cd webapp/backend
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 python server.py
 ```
 
-**大模型服务商**：默认 `deepseek`，也可改用华东师范大学的 `chatecnu` —— 两者都是 OpenAI 兼容
-接口，调用代码完全复用，只需在 `.env` 里切换 `LLM_PROVIDER`。`deepseek` 读 `DEEPSEEK_API_KEY`
-/ `DEEPSEEK_API_URL` / `DEEPSEEK_MODEL`，`chatecnu` 读 `CHATECNU_API_KEY` / `CHATECNU_API_URL`
-/ `CHATECNU_MODEL`（URL 与模型名都有默认值，只有密钥必须自己填）。
+后端默认运行在 `http://127.0.0.1:5000`。
 
-**选中的服务商没有配密钥时，`/api/chat` 会明确返回“AI 服务尚未配置”，不会自动切换到另一个
-服务商**，避免调用方误判数据流向。后端启动时会在控制台打印当前生效的服务商与模型名，便于排查。
+没有配置大模型时，后端仍可启动；`/api/chat` 会明确返回“AI 服务尚未配置”，不会静默切换服务商。
 
-仓库不包含密钥。`.env` 已被 Git 忽略，禁止把真实凭据写回源码或提交到仓库。
+### 2. 配置并启动前端
 
-**自动搜索公开网页**：校园热力图生成页支持 Tavily（默认）和 Brave Search。在项目根目录
-`.env` 中至少配置 `USERDATA_REVIEW_TOKEN`，再选择并填写一组搜索配置：
+另开一个终端：
 
-```dotenv
-WEB_SEARCH_PROVIDER=tavily
-TAVILY_API_KEY=tvly-你的密钥
-
-# 或改为 brave，并填写 BRAVE_SEARCH_API_KEY
+```powershell
+cd webapp/frontend
+Copy-Item .env.example .env
 ```
 
-重启后端后打开 `http://localhost/#/campus-build`，勾选“自动搜索公开网页”即可。系统只把搜索
-结果作为候选来源：最多两条查询、十个 HTTPS 页面、每域默认两页；页面还会经过公网地址、重定向、
-类型和大小校验，最终必须人工审核。完整配置和接口示例见
-[校园资产生成器说明](tools/campus_generator/CAMPUS_GENERATOR.md)。
+填写高德浏览器 Key：
 
-仓库已包含当前 3122 条 POI 对应的语义向量索引；新增、删除、重命名 POI 文件或修改场景语料后，
-运行时会明确标记索引过期，此时需要运行 `build_semantic_index.py` 重新生成。
+```dotenv
+VITE_APP_API_HOST=http://127.0.0.1:5000
+VITE_AMAP_KEY=你的高德浏览器Key
+VITE_AMAP_SECURITY_CODE=你的安全密钥
+```
 
-语义检索相关环境变量：
+安装依赖并启动：
 
-```text
+```powershell
+npm install
+npm run dev
+```
+
+前端默认使用 Vite 端口 `80`，浏览器访问 `http://localhost:80`。
+
+如果本机没有权限监听 80 端口，可以在 `webapp/frontend/vite.config.ts` 中修改端口。
+
+### 3. 可选配置
+
+#### 语义检索
+
+```dotenv
 SEMANTIC_ENABLED=auto
 SEMANTIC_MODEL_PATH=BAAI/bge-small-zh-v1.5
 SEMANTIC_INDEX_FILE=semantic_index.npz
 SEMANTIC_INDEX_META_FILE=semantic_index_meta.json
 ```
 
-- `SEMANTIC_ENABLED=auto`：存在依赖和索引时启用，否则自动回退到关键词规则。
-- `SEMANTIC_ENABLED=false`：强制关闭句向量检索。
-- 精确地点查询始终优先于语义推荐；例如“枣阳路460停车场在哪里”只返回一个地点，不进入 Top 排名。
+- `auto`：有依赖和有效索引时启用，否则回退关键词规则。
+- `false`：强制关闭句向量检索。
+- 修改 POI 文件或场景语料后，重新生成索引：
 
-可运行离线评测集检查精确查询、场景识别和无数据保护：
-
-```bash
-python evaluate_semantic_queries.py --strict
+```powershell
+cd webapp/backend
+python build_semantic_index.py
 ```
 
-第二阶段的四类校园场景热图现已接入华师大普陀、华师大闵行和交大闵行。交大当前没有植物点位，
-因此“赏花”会明确提示有效点位不足，拍照、散步和约会仍正常可用；其余两校区四类场景均可用。
-仓库已包含当前数据对应的 26 份离线热力图缓存，启动后端即可在智能问答页面选择“场景热图”。
-数据或算法变化后，可在后端目录运行 `python build_scene_heatmaps.py` 重新生成。两个构建脚本均默认只读本地模型；
-首次需要下载模型时显式加 `--allow-download`，也可用 `--output-dir` 先写入临时目录验收。
-也可切回“原版推荐”进行对照。算法说明、数据限制和测试步骤见
-[第二阶段说明](webapp/backend/PHASE2_HEATMAPS.md)。
+首次没有本地模型时，显式使用 `--allow-download`。
 
-步骤2.重开新命令行开启前端
+#### 图片问答
+
+纯文本模型不能直接处理图片，需要单独配置视觉模型，例如：
+
+```dotenv
+VISION_ENABLED=auto
+VISION_API_KEY=你的视觉模型密钥
+VISION_API_URL=视觉模型接口地址
+VISION_MODEL=视觉模型名称
+```
+
+未启用视觉模型时，前端上传入口仍可显示，但系统会明确提示当前部署不支持图片理解。
+
+#### 用户共建和审核
+
+```dotenv
+USERDATA_REVIEW_TOKEN=至少16位的本地审核密钥
+```
+
+用户共建数据默认写入 `webapp/backend/userdata/`，该目录已被 Git 忽略。没有审核密钥时，审核相关接口返回 403。
+
+#### 校园资产自动发现
+
+自动使用高德 POI 或公开网页搜索时，需要在根目录 `.env` 配置：
+
+```dotenv
+AMAP_WEB_SERVICE_KEY=高德Web服务Key
+WEB_SEARCH_PROVIDER=tavily
+TAVILY_API_KEY=你的Tavily密钥
+```
+
+也可将 `WEB_SEARCH_PROVIDER` 改为 `brave` 并填写 `BRAVE_SEARCH_API_KEY`。搜索结果只作为候选，必须经过人工审核后才能发布。详细说明见 [`tools/campus_generator/CAMPUS_GENERATOR.md`](tools/campus_generator/CAMPUS_GENERATOR.md)。
+
+## 页面和路由
+
+| 路由 | 功能 |
+| --- | --- |
+| `/#/index` | 首页和植物预测演示 |
+| `/#/map` | 植物地图与植物图鉴 |
+| `/#/classify` | 植物分类图表 |
+| `/#/plantmessage` | 认养寄语和词云 |
+| `/#/chatbot` | 智能问答、地图、热力图、行程规划和图片问答 |
+| `/#/place-review` | 用户共建数据审核 |
+| `/#/campus-build` | 校园资产发现、预览、审核和发布 |
+
+## 后端 API
+
+| 接口 | 用途 |
+| --- | --- |
+| `GET /api/health` | 健康检查和能力状态 |
+| `POST /api/chat` | 智能问答主接口 |
+| `GET /api/heatmaps` | 读取场景热力图缓存 |
+| `GET /api/emotions` | 读取认养寄语情感分析结果 |
+| `POST /api/feedback` | 提交消息反馈 |
+| `POST /api/place_report` | 上报校园地点 |
+| `GET /api/userdata/pending` | 获取待审核数据 |
+| `POST /api/userdata/review` | 通过或驳回候选地点 |
+| `POST /api/userdata/extract` | 批量使用大模型补齐地点候选 |
+| `GET /api/userdata/export` | 导出已审核地点 |
+| `/api/campus/build/*` | 校园资产构建、预览和发布 |
+| `POST /api/campus/discover` | 自动发现校园资料和候选地点 |
+
+## 场景热力图
+
+热力图算法和参数位于：
+
+- [`webapp/backend/scene_heatmaps.py`](webapp/backend/scene_heatmaps.py)
+- [`webapp/backend/heatmap_config.json`](webapp/backend/heatmap_config.json)
+- [`webapp/backend/heatmap_cache/`](webapp/backend/heatmap_cache/)
+
+当前正式热力图配置覆盖华师大普陀和闵行两个校区，四类场景均有缓存。交大闵行保留在多校区配置和资产生成链路中，但在当前问答页面中标记为非正式问答校区；其赏花场景点位不足时会明确降级。
+
+数据或算法发生变化后，重新构建：
+
+```powershell
+cd webapp/backend
+python build_scene_heatmaps.py
+```
+
+评测脚本不参与网站启动，仅用于离线对照：
+
+```powershell
+python evaluate_scene_heatmaps.py --sensitivity
+```
+
+评测结果写入 `heatmap_cache/evaluation.json`。该文件可以删除，不影响网站运行；需要时可重新生成。
+
+算法说明见 [`webapp/backend/PHASE2_HEATMAPS.md`](webapp/backend/PHASE2_HEATMAPS.md)。
+
+## 项目结构
+
+```text
+.
+├── data/                         # 原始植物数据、模板和数据处理脚本
+├── analysis/                     # 情感、文化关键词和预测模型的历史分析材料
+├── visualization/                # 可直接打开的静态图表
+├── tools/campus_generator/       # 校园资产发现、规范化、审核和发布工具
+├── scripts/                      # 数据脱敏和发布检查脚本
+├── webapp/frontend/              # Vue 3 + TypeScript 前端
+│   ├── src/views/                # 页面和路由视图
+│   ├── src/components/           # 热力图、行程、审核、图片附件等组件
+│   └── src/api/                  # 前端 API 封装
+└── webapp/backend/               # Flask 后端
+    ├── api/                      # Flask Blueprint 接口
+    ├── *_pois.json               # 统一校园 POI 数据
+    ├── heatmap_cache/            # 离线热力图缓存
+    ├── semantic_index.npz        # 语义检索向量索引
+    └── userdata/                 # 本地用户共建数据，默认不入库
+```
+
+## 数据文件说明
+
+- `data/all_trees.json`：植物原始记录，后端用于构建植物位置和坐标索引。
+- `data/all_templates.json`：植物种类、科属、习性等模板数据。
+- `webapp/backend/tree_locations.json`：植物名称到建筑/位置描述的预处理映射。
+- `webapp/backend/college_locations.json`：学院和楼宇位置数据。
+- `webapp/backend/*_pois.json`：食堂、停车、校园场景等结构化 POI。
+- `webapp/frontend/src/assets/try.json`：旧版植物地图、图鉴和预测演示使用的前端数据切片。
+- `webapp/frontend/src/assets/emotion_analysis.json`：寄语情感分析展示数据。
+- `webapp/backend/semantic_index.npz`：预计算语义向量；源数据变化后必须重建。
+
+认养人姓名、单位和寄语属于项目公开数据的一部分。若需发布脱敏版本，应使用 [`scripts/sanitize_public_data.py`](scripts/sanitize_public_data.py)，不要手工修改运行时数据。
+
+## 测试与质量检查
+
+后端完整开发依赖：
+
+```powershell
+cd webapp/backend
+python -m pip install -r requirements-dev.txt
+```
+
+在仓库根目录运行：
+
+```powershell
+python -m pytest -q
+python -m ruff check .
+```
+
+前端检查和构建：
+
 ```powershell
 cd webapp/frontend
-Copy-Item .env.example .env
-# 在 .env 中填写受域名和配额限制的高德浏览器 Key
-npm install
-npm run dev
+npx vue-tsc --noEmit
+npm run test:heatmap
+npm run build
 ```
 
-步骤3.启动后在浏览器打开 `http://localhost:80`
+发布前建议检查敏感信息：
 
-> 注意：地图功能依赖高德地图 API。浏览器 Key 对访问者可见，必须在高德控制台限制可用域名、服务和配额。
-
-
----
-
-## 📁 项目结构
-
-```
-Plants-in-ECNU/
-├── data/                        # 数据爬取与处理
-│   ├── all_trees.json           # 脱敏后的植物位置与尺寸数据
-│   ├── all_templates.json       # 植物种类详情（科、习性）
-│   ├── all_trees_for_lib.json   # 附加文化关键词的完整数据
-│   ├── get_data_code/           # 爬虫脚本（Charles 抓包 + Python）
-│   └── icon/                    # 植物图标图片
-│
-├── analysis/                    # 数据分析
-│   ├── emotion/                 # 领养寄语情感分析（讯飞星火 API）
-│   ├── culture/                 # 植物文化关键词提取（NLP）
-│   └── prediction/              # 领养预测模型
-│       ├── reg/                 # 逻辑回归（AIC 筛变量）
-│       └── svm/                 # SVM（准确率 0.75 / AUC 0.99）
-│
-├── visualization/               # 静态可视化（直接用浏览器打开）
-│   ├── charts/                  # 桑基图 / 旭日图 / 平行坐标轴
-│   └── wordcloud/               # 词云
-│
-├── webapp/                      # 主网站
-    ├── frontend/                # Vue 3 + TypeScript + ECharts 前端
-    └── backend/                 # Python Flask + MySQL 后端         
+```powershell
+python scripts/check_publication.py
 ```
 
----
+CI 使用 `webapp/backend/requirements-ci.txt`，不安装体积较大的 Sentence Transformers 依赖；后端在缺少该依赖时会自动使用关键词检索回退路径。
 
-## ✨ 功能模块
+## 已知限制
 
-- **交互式地图**：基于腾讯地图 API 的植物点聚合地图，展示各校区植物分布
-- **植物图鉴**：按种类、校区筛选浏览全部在册植物
-- **领养寄语**：浏览完整的植物认养者寄语及情感分析结果
-- **领养预测**：逻辑回归 + SVM 预测最可能被认养的植物（AUC 0.99）
-- **情感分析**：讯飞星火大模型对寄语内容的情感分析
-- **静态图表**：桑基图、旭日图、平行坐标轴、词云
+1. 地图和步行路线依赖有效的高德浏览器 Key；Key 会暴露在浏览器端，必须在高德控制台限制域名、服务和配额。
+2. 语义检索依赖本地模型和索引，首次安装可能需要较大的 PyTorch/Sentence Transformers 依赖。
+3. 热力图是离线 POI 和植物分布模型，不等同于实时人流、正式校界、导航路线或真实花期预测。
+4. 行程中的距离和耗时在后端默认是直线估算，前端会尝试用高德步行算路结果覆盖。
+5. 图片问答只有在显式配置视觉模型后才会真正调用图片理解能力。
+6. 用户共建数据默认保存在本机文件中，当前审核机制是单一共享密钥，适合本机或小范围内网使用。
+7. 首页的“植物预测”目前是随机植物展示演示，不是实时调用 `analysis/prediction/` 下训练模型的在线预测接口。
 
----
+## 静态可视化
 
-## 🛠️ 技术栈
+无需启动前后端即可打开：
 
-| 模块 | 技术 |
-|------|------|
-| 前端 | Vue 3 · TypeScript · Vite · ECharts 6 · Element Plus · D3.js |
-| 后端 | Python · Flask · MySQL |
-| 数据爬取 | Python · Charles 抓包 |
-| 数据分析 | Jupyter Notebook · Pandas · scikit-learn |
-| NLP | 讯飞星火大模型 API · Pyecharts |
-| 语义检索 | Sentence Transformers · 中文句向量 · 余弦相似度 |
-| 地图 | 高德地图 JavaScript API |
+| 图表 | 文件 |
+| --- | --- |
+| 桑基图 | `visualization/charts/sankey/sankey.html` |
+| 旭日图 | `visualization/charts/sunburst/sunburst-only.html` |
+| 平行坐标轴 | `visualization/charts/parallel/parallel.html` |
+| 词云 | `visualization/wordcloud/res/exp.html` |
 
----
+## 安全与提交约定
 
-## 📊 数据说明
+- `.env`、数据库密码、模型密钥和审核密钥禁止提交。
+- 前端 `VITE_*` 变量会进入浏览器，不能放置后端密钥。
+- 用户共建数据目录默认被 `.gitignore` 忽略。
+- 修改正式 POI 或热力图资产前，先运行测试和发布检查。
 
-数据来源于华东师范大学微信小程序「芳秾」，涵盖**闵行校区**和**中北校区**的全部在册植物。
+## 项目许可
 
-主要字段：位置（经纬度）、校区、树高 / 胸径 / 冠幅、植物种类（含科名、习性）、领养人信息（姓名、单位、寄语）。
-
----
-
-## 项目来源
-
-原项目为静态可视化版本，包含植物分布图（HTML + D3.js）、初步数据爬取和词云生成。本项目在此基础上进行了全面重构与扩展：
-
-- 数据规模扩大，覆盖闵行、中北双校区全部在册植物
-- 从静态页面升级为 Vue 3 全栈 Web 应用
-- 新增 ML 预测模型（逻辑回归 + SVM）
-- 新增 NLP 情感分析（讯飞星火 API）
-- 新增多种交互式图表（桑基图、旭日图、平行坐标轴）
-
----
-
-## 团队
-
-华东师范大学
+详见 [`LICENSE`](LICENSE)。
