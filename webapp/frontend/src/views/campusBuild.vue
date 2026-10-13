@@ -69,12 +69,6 @@
           <div v-if="resolvedDiscovery.address"><dt>地址</dt><dd>{{ resolvedDiscovery.address }}</dd></div>
         </dl>
       </div>
-      <div v-if="diagnosticWarnings.length" class="warning-list" role="status">
-        <strong>任务提示</strong>
-        <ul>
-          <li v-for="(warning, index) in diagnosticWarnings" :key="`${index}-${warning}`">{{ warning }}</li>
-        </ul>
-      </div>
       <div v-if="showZeroCandidateHelp" class="zero-candidate-help" role="alert">
         <strong>未发现可用地点</strong>
         <p>请先核对上方解析出的学校和校区是否正确，再按以下方式重试：</p>
@@ -109,6 +103,27 @@
           <el-tag type="success">通过 {{ review.approved.length }}</el-tag>
           <el-tag type="info">无效 {{ review.pendingInvalid.length }}</el-tag>
         </div>
+        <div v-if="pendingItems.length" class="batch-review-toolbar">
+          <el-checkbox
+            :model-value="allPendingSelected"
+            :indeterminate="somePendingSelected"
+            @change="toggleAllPending"
+          >全选待审</el-checkbox>
+          <span>已选 {{ batchSelectedIds.length }} 个</span>
+          <el-button
+            size="small"
+            type="primary"
+            :disabled="!batchSelectedIds.length"
+            :loading="batchReviewing"
+            @click="batchDecide('approve')"
+          >批量通过并导入</el-button>
+          <el-button
+            size="small"
+            :disabled="!batchSelectedIds.length"
+            :loading="batchReviewing"
+            @click="batchDecide('reject')"
+          >批量拒绝</el-button>
+        </div>
         <div v-if="!reviewQueue.length" class="empty">暂无待审核地点，请检查采集来源或任务警告。</div>
         <article
           v-for="item in reviewQueue"
@@ -118,7 +133,16 @@
           @click="selectCandidate(item)"
         >
           <div class="candidate-title">
-            <strong>{{ item.name }}</strong>
+            <div class="candidate-name">
+              <el-checkbox
+                v-if="item.reviewStatus === 'pending'"
+                :model-value="batchSelectedIds.includes(item.id)"
+                :aria-label="`选择 ${item.name}`"
+                @click.stop
+                @change="value => toggleBatchCandidate(item.id, Boolean(value))"
+              />
+              <strong>{{ item.name }}</strong>
+            </div>
             <el-tag size="small" :type="reviewTagType(item.reviewStatus)">{{ reviewLabel(item.reviewStatus) }}</el-tag>
           </div>
           <p>{{ item.subCategory }} · {{ item.lng.toFixed(5) }}, {{ item.lat.toFixed(5) }}</p>
@@ -234,6 +258,7 @@ import {
 import { getReviewToken, setReviewToken } from '../api/userdata';
 import {
   HEATMAP_LAYER_OPACITY,
+  PREVIEW_HEATMAP_OPTIONS,
   heatmapRampCss,
   renderHeatmapCanvas,
 } from '../components/heatmapRender';
@@ -255,6 +280,8 @@ const error = ref('');
 const submitting = ref(false);
 const loadingReview = ref(false);
 const reviewing = ref(false);
+const batchReviewing = ref(false);
+const batchSelectedIds = ref<string[]>([]);
 const previewing = ref(false);
 const previewReady = ref(false);
 const previewScene = ref('walk');
@@ -266,6 +293,13 @@ const mapEl = ref<HTMLElement | null>(null);
 const edit = reactive({ name: '', locationName: '', lng: 0, lat: 0 });
 const progress = computed(() => job.value?.status === 'queued' ? 12 : 62);
 const pendingItems = computed(() => review.value?.candidates.filter(item => item.reviewStatus === 'pending') || []);
+const pendingIdSet = computed(() => new Set(pendingItems.value.map(item => item.id)));
+const allPendingSelected = computed(() => (
+  pendingItems.value.length > 0 && pendingItems.value.every(item => batchSelectedIds.value.includes(item.id))
+));
+const somePendingSelected = computed(() => (
+  batchSelectedIds.value.length > 0 && !allPendingSelected.value
+));
 const resolvedDiscovery = computed(() => {
   const discovery = job.value?.discovery;
   return {
@@ -283,10 +317,6 @@ const redactDiagnostic = (value: unknown) => String(value || '')
   .replace(/\b(?:tvly|sk)-[a-z0-9_-]{12,}\b/gi, '[凭证已隐藏]')
   .trim();
 const safeError = computed(() => redactDiagnostic(error.value));
-const diagnosticWarnings = computed(() => Array.from(new Set([
-  ...(job.value?.discoveryWarnings || []),
-  ...(job.value?.warnings || []),
-].map(redactDiagnostic).filter(Boolean))));
 const showZeroCandidateHelp = computed(() => (
   ['completed', 'blocked'].includes(job.value?.status || '')
   && (job.value?.normalizedCount ?? job.value?.candidateCount ?? 0) === 0
@@ -351,6 +381,15 @@ const sourceConfidence = (candidate: CandidatePoi) => {
   return candidate.quality && Number.isFinite(candidate.confidence) ? candidate.confidence : undefined;
 };
 const saveReviewToken = () => setReviewToken(reviewToken.value);
+const toggleBatchCandidate = (id: string, checked: boolean) => {
+  const selectedIds = new Set(batchSelectedIds.value);
+  if (checked && pendingIdSet.value.has(id)) selectedIds.add(id);
+  else selectedIds.delete(id);
+  batchSelectedIds.value = [...selectedIds];
+};
+const toggleAllPending = (checked: boolean | string | number) => {
+  batchSelectedIds.value = checked ? pendingItems.value.map(item => item.id) : [];
+};
 const scoreLabel = (key: string) => ({
   campusEvidence: '校园证据',
   boundaryEvidence: '边界证据',
@@ -489,6 +528,37 @@ const decide = async (action: 'approve' | 'reject' | 'pending') => {
   } catch (err) { error.value = err instanceof Error ? err.message : '审核操作失败'; }
   finally { reviewing.value = false; }
 };
+const batchDecide = async (action: 'approve' | 'reject') => {
+  if (!job.value || !batchSelectedIds.value.length) return;
+  const ids = batchSelectedIds.value.filter(id => pendingIdSet.value.has(id));
+  if (!ids.length) return;
+  try {
+    await ElMessageBox.confirm(
+      action === 'approve'
+        ? `确认将选中的 ${ids.length} 个地点批量通过并导入当前热图任务吗？`
+        : `确认批量拒绝选中的 ${ids.length} 个地点吗？`,
+      action === 'approve' ? '批量导入地点' : '批量拒绝地点',
+      { confirmButtonText: '确认', cancelButtonText: '取消', type: action === 'approve' ? 'warning' : 'info' },
+    );
+  } catch { return; }
+  batchReviewing.value = true; error.value = '';
+  try {
+    review.value = await submitCampusReview(
+      job.value.id,
+      ids.map(id => ({ id, action })),
+    );
+    batchSelectedIds.value = [];
+    selected.value = null;
+    drawerVisible.value = false;
+    previewReady.value = false;
+    job.value.previewStatus = 'stale';
+    publishPlan.value = null;
+    clearHeatmap();
+    renderMarkers();
+    ElMessage.success(action === 'approve' ? `已批量导入 ${ids.length} 个地点` : `已批量拒绝 ${ids.length} 个地点`);
+  } catch (err) { error.value = err instanceof Error ? err.message : '批量审核失败'; }
+  finally { batchReviewing.value = false; }
+};
 const showPublishPlan = async () => {
   if (!job.value) return;
   publishing.value = true; error.value = '';
@@ -559,7 +629,8 @@ const loadPreview = async () => {
     if (!grid || grid.values.length !== grid.width * grid.height || grid.rowOrder !== 'north_to_south') {
       throw new Error('热力网格格式不正确');
     }
-    const canvas = renderHeatmapCanvas(grid);
+    // 仅预览使用柔和配置，不改变智能问答页的默认渲染。
+    const canvas = renderHeatmapCanvas(grid, PREVIEW_HEATMAP_OPTIONS);
     if (!canvas) throw new Error('当前浏览器不支持热力图渲染');
     clearHeatmap();
     const AMap = (window as any).AMap; heatLayer = new AMap.ImageLayer({ url: canvas.toDataURL('image/png'), bounds: grid.bounds, zooms: [3, 22], opacity: HEATMAP_LAYER_OPACITY, zIndex: 80 }); map.add(heatLayer);
@@ -567,6 +638,10 @@ const loadPreview = async () => {
 };
 onMounted(initMap);
 watch(() => review.value?.candidates, renderMarkers, { deep: true });
+watch(pendingItems, items => {
+  const ids = new Set(items.map(item => item.id));
+  batchSelectedIds.value = batchSelectedIds.value.filter(id => ids.has(id));
+});
 onBeforeUnmount(() => { if (timer) window.clearInterval(timer); clearMarkers(); clearHeatmap(); map?.destroy?.(); });
 </script>
 
@@ -585,14 +660,15 @@ onBeforeUnmount(() => { if (timer) window.clearInterval(timer); clearMarkers(); 
 .discovery-details dl div { display: flex; min-width: 170px; gap: 6px; }
 .discovery-details dt { color: #909399; }
 .discovery-details dd { margin: 0; color: #303133; word-break: break-word; }
-.warning-list, .zero-candidate-help { margin-top: 10px; padding: 10px 12px; border: 1px solid #f3d19e; border-radius: 8px; background: #fdf6ec; color: #8a5a16; font-size: 12px; line-height: 1.55; }
-.warning-list ul, .zero-candidate-help ul { margin: 5px 0 0; padding-left: 18px; }
-.zero-candidate-help { border-color: #fab6b6; background: #fef0f0; color: #b42318; }
+.zero-candidate-help { margin-top: 10px; padding: 10px 12px; border: 1px solid #fab6b6; border-radius: 8px; background: #fef0f0; color: #b42318; font-size: 12px; line-height: 1.55; }
+.zero-candidate-help ul { margin: 5px 0 0; padding-left: 18px; }
 .zero-candidate-help p { margin-top: 5px; }
 .search-results { margin-top: 10px; color: #606266; font-size: 12px; } .search-results summary { cursor: pointer; color: #409eff; } .search-results ol { margin: 8px 0 0; padding-left: 22px; } .search-results li { margin: 5px 0; } .search-results a { color: #409eff; word-break: break-all; } .search-results small { display: block; margin-top: 2px; color: #909399; }
 .job-summary { flex-wrap: wrap; color: #606266; font-size: 13px; } .job-summary div { padding-right: 16px; border-right: 1px solid #ebeef5; } .job-summary div:last-child { border-right: 0; } .job-summary span { color: #909399; margin-right: 5px; } code { color: #909399; font-size: 11px; }
 .workspace { display: grid; grid-template-columns: minmax(320px, 430px) minmax(0, 1fr); min-width: 0; gap: 14px; min-height: 560px; } .candidate-panel { min-width: 0; overflow: auto; max-height: 680px; } .panel-head { justify-content: space-between; align-items: flex-start; } .review-stats { margin: 14px 0 8px; }
+.batch-review-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 9px 10px; margin-bottom: 8px; border: 1px solid #d9ecff; border-radius: 8px; background: #f4f9ff; } .batch-review-toolbar > span { margin-right: auto; color: #606266; font-size: 12px; }
 .candidate-item { padding: 11px 10px; margin: 8px 0; border: 1px solid #ebeef5; border-left: 4px solid #e6a23c; border-radius: 9px; cursor: pointer; transition: .15s; } .candidate-item:hover, .candidate-item.selected { background: #fff8f1; border-color: #e6a23c; } .candidate-item.approved { border-left-color: #67c23a; } .candidate-item.rejected { border-left-color: #909399; opacity: .7; } .candidate-title { display: flex; justify-content: space-between; gap: 8px; } .candidate-item p, .candidate-meta { color: #909399; font-size: 12px; margin-top: 5px; } .candidate-meta { display: flex; justify-content: space-between; }
+.candidate-name { display: flex; align-items: flex-start; min-width: 0; gap: 8px; } .candidate-name strong { overflow-wrap: anywhere; }
 .map-panel { position: relative; min-width: 0; min-height: 560px; padding: 0; overflow: hidden; } .map { width: 100%; height: 100%; min-height: 560px; } .map-toolbar { position: absolute; z-index: 3; left: 12px; right: 12px; top: 12px; flex-wrap: wrap; width: fit-content; max-width: calc(100% - 24px); box-sizing: border-box; padding: 8px; border-radius: 9px; background: rgba(255,255,255,.95); box-shadow: 0 3px 12px #0002; } .map-hint { position: absolute; left: 12px; right: 12px; bottom: 12px; width: fit-content; max-width: calc(100% - 24px); box-sizing: border-box; padding: 7px 10px; background: rgba(255,255,255,.92); color: #909399; font-size: 12px; border-radius: 7px; }
 .preview-success { color: #529b2e; } .publish-hint { position: absolute; left: 12px; bottom: 44px; padding: 7px 10px; background: rgba(255,248,230,.95); color: #b88230; font-size: 12px; border-radius: 7px; }
 /* 临时热图图例：颜色含义此前无从得知，这里补齐（渐变与栅格同源）。 */

@@ -13,7 +13,8 @@
  *    `t≈0.5` 时得到 `rgb(128,123,120)`，是纯灰——这就是"脏灰绿"的来源。
  *    这里改成 HSL 插值（色相单调下降、饱和与明度固定），中段始终是饱和色。
  * 3. **低分辨率栅格被直接拉伸**：60×69 的栅格铺满整个 bounds，等值过渡发虚。
- *    这里先把**数值**做双线性上采样，再着色并叠加等值带边界，过渡更细腻。
+ *    这里先把**数值**做双线性上采样，再着色，最后用 Canvas 高斯模糊把栅格边缘
+ *    融合成圆润的热斑。问答页与智能体预览各自显式选择渲染参数，互不影响。
  *
  * 另外把色带抽成单一来源，图例（CSS 渐变）与栅格（Canvas）取自同一个函数，不会再出现
  * "两个页面颜色不一样"。
@@ -27,12 +28,16 @@ export interface HeatmapGrid {
   values: number[];
   maxValue: number;
   noData: number;
+  /** Display-only campus envelope, separate from POI-derived heat values. */
+  coverage?: number[];
 }
 
 /**: 低于这个相对强度完全不画（让底图保持可读）。 */
 export const HEATMAP_DISPLAY_THRESHOLD = 0.12;
 /**: 栅格默认上采样倍数（数值插值，不是图像拉伸）。 */
 export const HEATMAP_UPSCALE = 3;
+/** 默认不模糊；问答页与预览页分别设置自己的模糊半径。 */
+export const HEATMAP_BLUR_PX = 0;
 /**: 等值带档数。 */
 export const HEATMAP_BANDS = 6;
 /**: 图层默认不透明度。alpha 改为从 0 起之后，需要比旧值(0.55/0.58)高一些才够亮。 */
@@ -93,13 +98,13 @@ export function rampColor(t: number): [number, number, number] {
 
 /**
  * 相对强度 → alpha(0~255)。
- * **下限是 0**：低于阈值完全不画；阈值以上用幂曲线抬升，让热点之间的层次拉开。
+ * 默认保留旧版 1.5 次幂曲线；各页面可显式选择热点外围曲线。
  */
-export function alphaFor(t: number, threshold = HEATMAP_DISPLAY_THRESHOLD): number {
+export function alphaFor(t: number, threshold = HEATMAP_DISPLAY_THRESHOLD, exponent = 1.5): number {
   const value = clamp01(t);
   if (value <= threshold) return 0;
   const ratio = (value - threshold) / (1 - threshold);
-  return Math.round(255 * Math.pow(ratio, 1.5));
+  return Math.round(255 * Math.pow(ratio, exponent));
 }
 
 /** 等值带序号（用于画边界线）。 */
@@ -119,10 +124,10 @@ export function heatmapRampCss(samples = 12): string {
 }
 
 /**
- * 数值栅格双线性上采样（不是把图像拉大，所以不会出现糊斑）。
- * `noData` 参与插值时按"有效邻居加权"处理；四邻全无效才输出 noData。
+ * 数值栅格双线性上采样。默认忽略 noData 邻居，保留问答页原行为；
+ * 预览页传 featherNoData=true，让 noData 按 0 强度参与插值，边界自然衰减。
  */
-export function upsampleGrid(grid: HeatmapGrid, factor = HEATMAP_UPSCALE): HeatmapGrid {
+export function upsampleGrid(grid: HeatmapGrid, factor = HEATMAP_UPSCALE, featherNoData = false): HeatmapGrid {
   const step = Math.max(1, Math.round(factor));
   if (step === 1) return grid;
   const width = grid.width * step;
@@ -139,35 +144,64 @@ export function upsampleGrid(grid: HeatmapGrid, factor = HEATMAP_UPSCALE): Heatm
       const wx = sourceX - x0;
       let weightSum = 0;
       let valueSum = 0;
+      let validWeight = 0;
       for (let dy = 0; dy <= 1; dy++) {
         for (let dx = 0; dx <= 1; dx++) {
           const sx = Math.min(grid.width - 1, Math.max(0, x0 + dx));
           const sy = Math.min(grid.height - 1, Math.max(0, y0 + dy));
           const sample = grid.values[sy * grid.width + sx];
-          if (sample === undefined || sample === grid.noData) continue;
+          if (!featherNoData && (sample === undefined || sample === grid.noData)) continue;
           const weight = (dx ? wx : 1 - wx) * (dy ? wy : 1 - wy);
           if (weight <= 0) continue;
           weightSum += weight;
-          valueSum += sample * weight;
+          if (sample !== undefined && sample !== grid.noData) {
+            valueSum += sample * weight;
+            validWeight += weight;
+          }
         }
       }
-      if (weightSum > 0) values[y * width + x] = valueSum / weightSum;
+      if (weightSum > 0 && validWeight > 0) values[y * width + x] = valueSum / weightSum;
     }
   }
 
-  return { ...grid, width, height, values };
+  const coverage = grid.coverage
+    ? upsampleGrid({ ...grid, coverage: undefined, values: grid.coverage }, step, true).values
+    : undefined;
+  return { ...grid, width, height, values, coverage };
 }
 
 export interface HeatmapRenderOptions {
-  /** 数值上采样倍数，默认 3。 */
+  /** 数值上采样倍数，默认 HEATMAP_UPSCALE（3）。 */
   upscale?: number;
   /** 等值带档数，默认 6。 */
   bands?: number;
-  /** 显示阈值（相对强度），默认 0.12。 */
+  /** 显示阈值（相对强度），默认 HEATMAP_DISPLAY_THRESHOLD（0.12）。 */
   threshold?: number;
-  /** 是否画等值带边界线，默认 true。 */
+  /** 是否画等值带边界线，默认 true（保留问答页原效果）。 */
   contours?: boolean;
+  alphaExponent?: number;
+  featherNoData?: boolean;
+  /** 后处理模糊半径，默认 HEATMAP_BLUR_PX；传 0 可关闭。 */
+  blurPx?: number;
+  /** Low-opacity campus context; does not change values or hotspot colours. */
+  coverageAlpha?: number;
+  /** Clip after interpolation and blur to the original data footprint. */
+  clipToData?: boolean;
 }
+
+/** Campus-wide soft context for chat; agent previews keep their own policy. */
+export const CHAT_HEATMAP_OPTIONS: HeatmapRenderOptions = {
+  // Keep the campus backdrop readable on bright map tiles, while a gentler
+  // alpha curve reveals low/medium heat without changing the scored field.
+  contours: false, threshold: 0.02, alphaExponent: 0.65,
+  featherNoData: true, blurPx: 6, coverageAlpha: 52, clipToData: true,
+};
+
+/** 仅生成页使用；问答页使用独立 CHAT_HEATMAP_OPTIONS。 */
+export const PREVIEW_HEATMAP_OPTIONS: HeatmapRenderOptions = {
+  upscale: 4, threshold: 0.05, contours: false, blurPx: 18,
+  alphaExponent: 0.9, featherNoData: true,
+};
 
 /**
  * 把栅格渲染成可直接交给 `AMap.ImageLayer` 的 canvas。
@@ -179,7 +213,7 @@ export function renderHeatmapCanvas(
 ): HTMLCanvasElement | null {
   const bands = options.bands ?? HEATMAP_BANDS;
   const threshold = options.threshold ?? HEATMAP_DISPLAY_THRESHOLD;
-  const dense = upsampleGrid(grid, options.upscale ?? HEATMAP_UPSCALE);
+  const dense = upsampleGrid(grid, options.upscale ?? HEATMAP_UPSCALE, options.featherNoData ?? false);
 
   const canvas = document.createElement('canvas');
   canvas.width = dense.width;
@@ -187,7 +221,15 @@ export function renderHeatmapCanvas(
   const context = canvas.getContext('2d');
   if (!context) return null;
 
-  const raster = context.createImageData(dense.width, dense.height);
+  // 先在无滤镜画布上写入栅格，再复制到输出画布并做模糊；直接对 putImageData
+  // 设置 filter 不生效。问答页最后裁剪，防止插值和模糊将颜色扩散到覆盖范围外。
+  const source = document.createElement('canvas');
+  source.width = dense.width;
+  source.height = dense.height;
+  const sourceContext = source.getContext('2d');
+  if (!sourceContext) return null;
+
+  const raster = sourceContext.createImageData(dense.width, dense.height);
   const bandOf = new Int16Array(dense.width * dense.height).fill(-1);
   const maxValue = grid.maxValue || 1;
 
@@ -195,9 +237,16 @@ export function renderHeatmapCanvas(
     const value = dense.values[index];
     if (value === undefined || value === grid.noData) continue;
     const t = clamp01(value / maxValue);
-    const alpha = alphaFor(t, threshold);
+    const envelope = dense.coverage
+      ? clamp01((dense.coverage[index] ?? 0) / maxValue) : 1;
+    const heatAlpha = Math.round(alphaFor(t, threshold, options.alphaExponent ?? 1.5) * envelope);
+    const contextAlpha = dense.coverage
+      ? Math.round((options.coverageAlpha ?? 0) * envelope) : 0;
+    const alpha = Math.max(heatAlpha, contextAlpha);
     if (alpha <= 0) continue;
-    const [r, g, b] = rampColor(t);
+    // Context remains cool blue even where no POI heat exists.  Never turn
+    // the display floor into a higher intensity or a warm recommendation.
+    const [r, g, b] = rampColor(heatAlpha > contextAlpha ? t : 0);
     raster.data[index * 4] = r;
     raster.data[index * 4 + 1] = g;
     raster.data[index * 4 + 2] = b;
@@ -205,8 +254,7 @@ export function renderHeatmapCanvas(
     bandOf[index] = bandIndexFor(t, bands);
   }
 
-  // 等值带边界：相邻格落在不同档时压暗一格，形成可见的等值线，
-  // 让结果读起来像"分层热力图"而不是一团云雾。
+  // 问答页默认显示等值带边界；预览页显式关闭。
   if (options.contours !== false) {
     const width = dense.width;
     for (let y = 0; y < dense.height; y++) {
@@ -226,6 +274,28 @@ export function renderHeatmapCanvas(
     }
   }
 
-  context.putImageData(raster, 0, 0);
+  sourceContext.putImageData(raster, 0, 0);
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.imageSmoothingEnabled = true;
+  const blurPx = Math.max(0, options.blurPx ?? HEATMAP_BLUR_PX);
+  if (blurPx > 0) {
+    context.filter = `blur(${blurPx}px)`;
+    context.drawImage(source, 0, 0);
+    context.filter = 'none';
+  } else {
+    context.putImageData(raster, 0, 0);
+  }
+  if (options.clipToData) {
+    const clipped = context.getImageData(0, 0, canvas.width, canvas.height);
+    for (let y = 0; y < dense.height; y++) {
+      const sy = Math.min(grid.height - 1, Math.floor(y * grid.height / dense.height));
+      for (let x = 0; x < dense.width; x++) {
+        const sx = Math.min(grid.width - 1, Math.floor(x * grid.width / dense.width));
+        const value = grid.values[sy * grid.width + sx];
+        if (value === undefined || value === grid.noData) clipped.data[(y * dense.width + x) * 4 + 3] = 0;
+      }
+    }
+    context.putImageData(clipped, 0, 0);
+  }
   return canvas;
 }

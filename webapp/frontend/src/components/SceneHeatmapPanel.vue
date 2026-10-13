@@ -22,7 +22,7 @@
           <input aria-label="热图透明度" type="range" min="0.15" max="0.85" step="0.05" v-model.number="opacity" />
         </label>
         <p>仅在同一校区、同一场景内比较；非实时花期、人流或噪声。</p>
-        <p>边界为数据覆盖范围，通行情况未核实。点击地图标记查看依据。</p>
+        <p>淡色为点位数据覆盖范围，不代表热点；非正式校界。点击标记查看依据。</p>
       </template>
       <p v-else>四类场景，按当前校区查看。选择场景，或直接提问。</p>
     </template>
@@ -37,6 +37,7 @@ import {
   HEATMAP_LAYER_OPACITY,
   heatmapRampCss,
   renderHeatmapCanvas,
+  CHAT_HEATMAP_OPTIONS,
 } from './heatmapRender';
 
 /** 与栅格同源的图例色带（避免图例和实际着色各写一套而漂移）。 */
@@ -100,7 +101,8 @@ const render = () => {
     error.value = '热力网格格式不正确';
     return;
   }
-  const canvas = renderHeatmapCanvas(grid);
+  // 校区淡色背景与真实热点分开显示，关闭深色等值线并柔化边缘。
+  const canvas = renderHeatmapCanvas(grid, CHAT_HEATMAP_OPTIONS);
   if (!canvas) {
     error.value = '当前浏览器不支持热力图渲染';
     return;

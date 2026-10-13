@@ -10,6 +10,7 @@
   同一个单测会校验磁盘内容与生成结果一致，防止前后端两处漂移。
 - 半径分两个概念：`trustRadiusM`（前端"认为属于该校区"的判定半径）与 `auditRadiusMeters`
   （构建脚本的热图审计半径，只在 `heatmap_config.json` 里维护），二者刻意不合并。
+- `qaEnabled: false` 的条目保留给智能体解析，但不生成问答页校区按钮或正式热图。
 - **多校共存**：用「`schools` 表 + 每个校区的 `school` 外键」表达"学校 → 校区"两级。
   `school_of(campus)` 取校区所属学校；`school_names()` / `school_fragments()` 取**全部学校的并集**，
   避免多校共存时查询清洗漏词（旧配置只有一个全局 `school`，多校下会互相污染）。
@@ -56,6 +57,15 @@ def reset_cache() -> None:
 
 def campuses() -> list:
     return config()['campuses']
+
+
+def qa_campuses() -> list:
+    """校区选择器与正式问答热图可用的校区。"""
+    return [item for item in campuses() if item.get('qaEnabled', True)]
+
+
+def qa_campus_names() -> list:
+    return [item['name'] for item in qa_campuses()]
 
 
 def campus_names() -> list:
@@ -341,8 +351,9 @@ def check_consistency() -> list:
     with open(HEATMAP_CONFIG_PATH, encoding='utf-8') as handle:
         heat_campuses = (json.load(handle).get('campuses') or {})
     known = campus_names()
+    qa_known = qa_campus_names()
     known_schools = schools()
-    if default_campus() not in known:
+    if default_campus() not in qa_known:
         problems.append(f'defaultCampus "{default_campus()}" 未在 campuses 中登记')
     if len(known) != len(set(known)):
         problems.append('campuses 中的 name 必须全局唯一')
@@ -360,6 +371,8 @@ def check_consistency() -> list:
                     f'{item["name"]}: school "{school_id}" 未在 schools 表中登记')
     for item in campuses():
         name = item['name']
+        if name not in qa_known:
+            continue
         other = heat_campuses.get(name)
         if not other:
             problems.append(f'{name}: heatmap_config.json 缺少该校区')
@@ -377,7 +390,7 @@ def check_consistency() -> list:
                 or audit_radius_m <= 0):
             problems.append(f'{name}: auditRadiusMeters 必须是正数')
     for name in heat_campuses:
-        if name not in known:
+        if name not in qa_known:
             problems.append(f'{name}: 出现在 heatmap_config.json 但未登记到 campuses.json')
     return problems
 
@@ -450,7 +463,7 @@ def render_frontend_ts() -> str:
         '',
         'export const CAMPUSES: CampusInfo[] = [',
     ]
-    for item in campuses():
+    for item in qa_campuses():
         alias_text = ', '.join(_js_string(word) for word in item['aliases'])
         school_id = item.get('school') or ''
         school_name = (school_table.get(school_id) or {}).get('name', '')
@@ -473,16 +486,16 @@ def render_frontend_ts() -> str:
         '',
         'export const CAMPUS_CENTERS: Record<string, [number, number]> = {',
     ]
-    for item in campuses():
+    for item in qa_campuses():
         lines.append(
             f'  {_js_string(item["name"])}: [{item["center"][0]}, {item["center"][1]}],')
     lines += ['};', '']
     lines += ['export const CAMPUS_LOCATION_RADIUS_M: Record<string, number> = {']
-    for item in campuses():
+    for item in qa_campuses():
         lines.append(f'  {_js_string(item["name"])}: {item["trustRadiusM"]},')
     lines += ['};', '']
     lines.append('export const CAMPUS_NAMES: string[] = ['
-                 + ', '.join(_js_string(item['name']) for item in campuses()) + '];')
+                 + ', '.join(_js_string(item['name']) for item in qa_campuses()) + '];')
     lines.append('')
     return '\n'.join(lines)
 

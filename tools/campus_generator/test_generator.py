@@ -425,6 +425,23 @@ class GeneratorTests(unittest.TestCase):
             self.assertEqual(campus["boundary"], TRUSTED_BOUNDARY)
             self.assertEqual(campus["coordinateSystem"], "GCJ-02")
 
+    def test_preview_expands_local_support_without_changing_formal_config(self):
+        backend_config = Path(__file__).resolve().parents[2] / "webapp/backend/heatmap_config.json"
+        original = backend_config.read_bytes()
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            _write_preview_pois(workspace, PROFILE, [])
+            config = json.loads((workspace / "heatmap_config.json").read_text(encoding="utf-8"))
+            self.assertEqual(config["supportMeters"], 200)
+            self.assertTrue(all("displayCoverage" not in entry
+                                for entry in config["campuses"].values()))
+            self.assertEqual(config["minInfluenceMeters"], 120)
+            self.assertEqual(config["maxInfluenceMeters"], 450)
+            self.assertEqual(config["minimumCategoryActivation"], 0.2)
+            self.assertNotIn("minimumCategoryActivation", json.loads(original))
+            self.assertEqual(config["campuses"]["示例校区"]["center"], PROFILE["campus"]["center"])
+            self.assertEqual(backend_config.read_bytes(), original)
+
     def test_preview_rejects_tampered_outside_candidate_before_build(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -734,6 +751,25 @@ class GeneratorTests(unittest.TestCase):
         self.assertEqual({item["name"] for item in result.candidates},
                          {"示例大学体育馆", "校园河岸步道"})
         self.assertTrue(all(item["scenes"] == ["walk"] for item in result.candidates))
+
+    def test_date_scene_harvester_excludes_ordinary_teaching_buildings(self):
+        profile = {"school": {"name": "示例大学"}, "campus": {
+            "name": "示例校区", "slug": "demo", "center": [121.0, 31.0], "trustRadiusM": 1000}}
+        harvester = SceneSupplementHarvester(
+            profile, "date", ["建筑", "图书馆", "咖啡店"], api_key="key", max_pages=1,
+        )
+        harvester.request_json = lambda _: {"status": "1", "pois": [
+            {"id": "college", "name": "示例大学材料学院", "type": "科教文化服务",
+             "location": "121.0,31.0"},
+            {"id": "library", "name": "示例大学图书馆", "type": "图书馆",
+             "location": "121.0,31.0"},
+            {"id": "coffee", "name": "校园咖啡店", "type": "咖啡店",
+             "location": "121.0,31.0"},
+        ]}
+        result = harvester.collect()
+        self.assertEqual({item["name"] for item in result.candidates},
+                         {"示例大学图书馆", "校园咖啡店"})
+        self.assertTrue(all(item["scenes"] == ["date"] for item in result.candidates))
 
     def test_scene_filter_uses_amap_keyword_and_trusted_distance(self):
         profile = {"school": {"name": "示例大学"}, "campus": {
@@ -1302,6 +1338,37 @@ class GeneratorTests(unittest.TestCase):
                                      "patch": {"lat": 31.002}}])
             self.assertEqual(approved_path.read_text(encoding="utf-8"), before_approved)
             self.assertEqual(state_path.read_text(encoding="utf-8"), before_state)
+
+    def test_review_approves_multiple_candidates_in_one_request(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "campus_profile.json").write_text(
+                json.dumps(PROFILE, ensure_ascii=False), encoding="utf-8",
+            )
+            candidates = [
+                {
+                    "id": f"p{index}", "name": f"校内地点{index}",
+                    "locationName": f"校内地点{index}", "lng": 121.0 + index * 0.0001,
+                    "lat": 31.0, "campus": "示例校区", "category": "scene",
+                    "subCategory": "校园景观", "text": f"校内地点{index}",
+                    "tags": [], "confidence": 0.8, "source": "amap",
+                }
+                for index in range(3)
+            ]
+            (root / "normalized_pois.json").write_text(
+                json.dumps(candidates, ensure_ascii=False), encoding="utf-8",
+            )
+            result = apply_review(root, [
+                {"id": "p0", "action": "approve"},
+                {"id": "p1", "action": "approve"},
+            ])
+            self.assertEqual(result["approvedCount"], 2)
+            self.assertEqual(
+                {item["id"] for item in result["approved"]},
+                {"p0", "p1"},
+            )
+            status = {item["id"]: item["reviewStatus"] for item in result["candidates"]}
+            self.assertEqual(status, {"p0": "approved", "p1": "approved", "p2": "pending"})
 
     def test_build_api_review_endpoint(self):
         sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "webapp" / "backend"))

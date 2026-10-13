@@ -36,6 +36,14 @@ def _write_preview_pois(workspace: Path, profile: dict, approved: list[dict]) ->
             "heatmap preview requires GCJ-02 coordinates; convert candidates explicitly first"
         )
     config = _read(BACKEND / "heatmap_config.json")
+    # Campus-wide display coverage is a chat-only policy, not a preview score.
+    for entry in config.get("campuses", {}).values():
+        entry.pop("displayCoverage", None)
+    # Reviewed campus landmarks are much sparser than the original plant data.
+    # Enlarge their local neighbourhoods, not the image bounds: stretching the
+    # raster would move hotspots away from the POIs that support them.
+    config.update(supportMeters=200, minInfluenceMeters=120, maxInfluenceMeters=450,
+                  minimumCategoryActivation=0.2)
     campus_name = campus["name"]
     existing = config.get("campuses", {}).get(campus_name)
     preview_campus = dict(existing or {})
@@ -87,9 +95,9 @@ def build_preview(output: str | Path) -> dict:
     workspace.mkdir(parents=True, exist_ok=True)
     _copy_common_sources(workspace)
     _write_preview_pois(workspace, profile, approved)
-    command = [sys.executable, str(BACKEND / "build_scene_heatmaps.py"),
+    command = [sys.executable, "-m", "tools.campus_generator.preview_heatmaps",
                "--base-dir", str(workspace), "--output-dir", str(cache)]
-    completed = subprocess.run(command, cwd=str(BACKEND), capture_output=True,
+    completed = subprocess.run(command, cwd=str(ROOT), capture_output=True,
                                text=True, timeout=900, check=False)
     if completed.returncode != 0:
         detail = (completed.stderr or completed.stdout or "heatmap preview failed").strip()

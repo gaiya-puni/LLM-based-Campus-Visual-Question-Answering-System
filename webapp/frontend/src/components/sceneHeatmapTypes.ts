@@ -8,6 +8,8 @@ export interface HeatmapPayload {
   grid: {
     width: number; height: number; bounds: [number, number, number, number];
     rowOrder: string; values: number[]; maxValue: number; noData: number;
+    /** Separate soft campus backdrop; never part of the recommendation score. */
+    coverage?: number[];
   };
   places: {
     name: string; number: string; lng: number; lat: number; campus: string;

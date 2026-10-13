@@ -2,7 +2,8 @@
 
 Only plant POIs are used in phase two. Existing rule ranking is not imported or
 modified. Analysis zones are metric grid cells, NOT official TAZs; the raster
-mask is a POI coverage hull, NOT a campus boundary or walkability assessment.
+mask is a POI coverage hull with local support, NOT an official boundary or
+walkability assessment.
 """
 from __future__ import annotations
 
@@ -20,7 +21,7 @@ import numpy as np
 
 from semantic_retrieval import canonical_source_bytes
 
-ALGORITHM_VERSION = "sakde-campus-9-knn-adaptive-bandwidth"
+ALGORITHM_VERSION = "sakde-campus-11-poi-coverage-display"
 SCENE_IDS = ("flower_viewing", "photo", "walk", "date")
 # 每个场景在每个校区展示的推荐点数（Top1..TopN）。该上限同时是 validate_payload 的
 # 结构校验硬边界，防止被篡改的缓存塞入过多点位。
@@ -31,7 +32,8 @@ MAX_PLACES = 5
 PLACE_PRIOR_SCENES = ("walk", "date", "photo")
 DISCLAIMER = (
     "基于植物资料与点位分布的相对适宜度，不是实时花期、人流或噪声测量。"
-    "覆盖范围由数据推定，非正式校界；标记为真实POI参考位置，通行情况需现场确认。"
+    "淡色背景仅表示点位数据覆盖范围，不代表该处具有热点证据，亦非正式校界；"
+    "标记为真实POI参考位置，通行情况需现场确认。"
 )
 
 # ---------------------------------------------------------------------------
@@ -414,6 +416,9 @@ def load_config(base: Path) -> dict:
     limit = config.get("placeLimit", MAX_PLACES)
     if type(limit) is not int or not 1 <= limit <= MAX_PLACES:
         raise ValueError("invalid placeLimit")
+    for campus, campus_config in (config.get("campuses") or {}).items():
+        if type(campus_config.get("displayCoverage", False)) is not bool:
+            raise ValueError(f"invalid displayCoverage for campus: {campus}")
     return config
 
 
@@ -723,6 +728,7 @@ def prepare_geometry(pois: list[dict], campus: str, config: dict,
     center = config["campuses"][campus]["center"]
     xy = to_meters([[p["lng"], p["lat"]] for p in selected], center)
     cell = config["cellMeters"]
+    # Restore the original data-shaped extent, not a campus-centred circle.
     low = np.floor(xy.min(axis=0) / cell) * cell - cell
     high = np.ceil(xy.max(axis=0) / cell) * cell + cell
     width, height = np.ceil((high-low) / cell).astype(int)
@@ -757,7 +763,8 @@ def prepare_geometry(pois: list[dict], campus: str, config: dict,
                 groups=groups, bands=bands, class_categories=class_categories,
                 width=int(width), height=int(height),
                 bounds=to_lnglat(np.array([low, high]), center).ravel().tolist(),
-                center=center, config=config, campus=campus, scene=scene)
+                center=center, config=config, campus=campus, scene=scene,
+                displayCoverage=config["campuses"][campus].get("displayCoverage", False))
 
 
 def _unit_scale(values: np.ndarray, mask: np.ndarray) -> np.ndarray:
@@ -874,7 +881,7 @@ def build_map(geometry: dict, scene: str, similarities: dict[str, float],
     field, contributions, betas = fuse_fields(geometry, similarities, plant_priors, season, scene,
                                               class_weights)
     raster = np.where(geometry["mask"], np.rint(field * 1000), -1).astype(int)
-    return {
+    payload = {
         "available": True, "algorithm": ALGORITHM_VERSION,
         "campus": geometry["campus"], "scene": scene,
         "sceneName": geometry["config"]["scenes"][scene],
@@ -892,11 +899,19 @@ def build_map(geometry: dict, scene: str, similarities: dict[str, float],
                                 "count": len(geometry["groups"][name]),
                                 "bandwidthMeters": geometry["bands"][name]}
                                for name in sorted(betas, key=lambda n: -similarities.get(n, 0))],
-        "disclaimer": DISCLAIMER, "boundarySource": "poi_convex_hull_with_support_mask",
+        "disclaimer": DISCLAIMER,
+        "boundarySource": "poi_convex_hull_with_support_mask",
         "coordinateSystem": geometry["config"]["coordinateSystem"],
         "normalization": "within_campus_and_scene_only",
         "negativeContribution": geometry["config"]["negativeContribution"],
     }
+    if geometry.get("displayCoverage"):
+        # Display-only coverage: never mixed into intensity, scores or rankings.
+        # Keep the original data boundary visible even in low-heat areas.
+        coverage = geometry["mask"] if np.any(field > 0) else np.zeros_like(geometry["mask"])
+        payload["grid"]["coverage"] = (coverage.astype(int) * 1000).tolist()
+        payload["coverageMeaning"] = "display_context_only_not_hotspot_evidence"
+    return payload
 
 
 class HeatmapStore:
@@ -979,6 +994,12 @@ def validate_payload(data: dict, campus: str, scene: str):
     if (not np.isfinite(bounds).all() or not (bounds[0] < bounds[2] and bounds[1] < bounds[3])
             or not np.isfinite(values).all() or not (((values >= 0) & (values <= 1000)) | (values == -1)).all()):
         raise ValueError("invalid heatmap grid values")
+    if "coverage" in grid:
+        coverage = np.asarray(grid["coverage"], dtype=float)
+        if (coverage.shape != values.shape or not np.isfinite(coverage).all()
+                or not ((coverage >= 0) & (coverage <= 1000)).all()
+                or np.any(coverage[values == -1] != 0)):
+            raise ValueError("invalid heatmap display coverage")
     if not isinstance(data["places"], list) or len(data["places"]) > MAX_PLACES:
         raise ValueError("invalid heatmap places")
     for place in data["places"]:

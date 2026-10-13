@@ -81,13 +81,13 @@ class DiscoveryPlan:
 
 
 THEME_KEYWORDS = {
-    "walk": ["步道", "林荫道", "绿地", "草坪", "湖泊", "河流", "河岸", "桥", "亭子", "运动场", "体育馆"],
-    "date": ["湖泊", "河流", "河岸", "桥", "亭子", "花园", "草坪", "图书馆", "咖啡店"],
-    "photo": ["湖泊", "河流", "河岸", "花园", "亭子", "樱花", "银杏", "草坪", "建筑", "图书馆", "体育馆", "校门", "广场", "雕塑", "桥"],
+    "walk": ["步道", "林荫道", "绿地", "草坪", "湖泊", "河流", "河岸", "桥", "亭子", "运动场", "体育馆", "操场", "足球场", "网球场", "游泳馆", "广场", "雕塑", "建筑"],
+    "date": ["湖泊", "河流", "河岸", "桥", "亭子", "花园", "草坪", "水景", "园林", "风景", "景观", "图书馆", "咖啡店", "广场", "雕塑", "文化场馆", "展馆", "博物馆", "艺术中心", "校门"],
+    "photo": ["湖泊", "河流", "河岸", "花园", "亭子", "樱花", "银杏", "草坪", "建筑", "图书馆", "体育馆", "校门", "广场", "雕塑", "桥", "操场", "游泳馆"],
     "flower": ["花园", "植物园", "樱花", "梅花", "荷花", "桂花", "银杏"],
     "study": ["图书馆", "教学楼", "自习室", "咖啡店"],
-    "food": ["食堂", "餐厅", "咖啡店", "小吃"],
-    "general": ["图书馆", "湖泊", "花园", "食堂", "体育场", "咖啡店"],
+    "food": ["食堂", "餐厅", "咖啡店", "小吃", "广场"],
+    "general": ["图书馆", "湖泊", "花园", "食堂", "体育场", "咖啡店", "河岸", "桥", "亭子", "体育馆", "建筑", "广场"],
 }
 
 PLANT_KEYWORDS = ["树木", "花卉", "植物", "樱花", "银杏", "梅花", "桂花", "紫藤", "绿化"]
@@ -124,6 +124,11 @@ COMMERCIAL_TERMS = NON_CAMPUS_PLANT_TERMS + (
     "住宅小区", "公寓", "底商", "服务公寓",
     "餐饮服务", "面馆", "餐厅", "饭店", "食堂", "小吃",
 )
+DATE_UNSUITABLE_TERMS = (
+    "学院", "教学楼", "实验楼", "科研楼", "研究院", "研究所", "工程训练",
+    "行政楼", "办公楼", "宿舍", "学生公寓", "科技园", "产业园", "充电站",
+)
+DATE_GENERIC_BUILDING_TERMS = ("楼", "大楼", "教学", "学院", "实验", "科研", "研究院", "研究所")
 
 SCENE_TERM_ALIASES = {
     "步道": ("步道", "小径", "漫步", "步行"),
@@ -133,16 +138,24 @@ SCENE_TERM_ALIASES = {
     "湖泊": ("湖", "湖泊", "水景"),
     "河流": ("河", "河流", "溪", "渠"),
     "河岸": ("河岸", "河畔", "水岸", "湖畔", "湖边"),
+    "水景": ("水景", "湖", "河", "溪", "水岸", "景观水体"),
     "桥": ("桥",),
     "亭子": ("亭", "亭子", "凉亭"),
     "花园": ("花园", "园林", "公园", "花圃", "花境", "园"),
+    "园林": ("园林", "园", "花园", "植物园", "景观"),
+    "风景": ("风景", "景点", "景观", "园林", "水景"),
+    "景观": ("景观", "风景", "园林", "水景", "绿地"),
     "地标建筑": ("楼", "馆", "塔", "门", "中心", "建筑"),
-    "建筑": ("楼", "馆", "塔", "门", "中心", "建筑"),
+    "建筑": ("楼", "馆", "塔", "门", "中心", "建筑", "科教文化", "楼宇"),
     "雕塑": ("雕塑", "雕像", "铜像", "纪念碑"),
-    "运动场": ("运动场", "操场", "田径场", "足球场", "球场"),
-    "体育场": ("体育场", "运动场", "操场"),
-    "体育馆": ("体育馆", "游泳馆", "健身中心"),
+    "运动场": ("运动场", "操场", "田径场", "足球场", "球场", "体育场", "体育场馆", "运动场馆"),
+    "体育场": ("体育场", "运动场", "操场", "体育场馆", "运动场馆"),
+    "体育馆": ("体育馆", "游泳馆", "健身中心", "体育场馆", "运动场馆"),
     "图书馆": ("图书馆",),
+    "文化场馆": ("文化场馆", "会堂", "展馆", "博物馆", "艺术中心", "美术馆", "文化中心"),
+    "展馆": ("展馆", "博物馆", "会堂", "美术馆", "展览馆"),
+    "博物馆": ("博物馆", "校史馆", "展馆", "会堂"),
+    "艺术中心": ("艺术中心", "艺术馆", "美术馆", "文化中心", "会堂"),
     "校门": ("校门", "大门", "门"),
     "广场": ("广场",),
     "咖啡店": ("咖啡",),
@@ -182,6 +195,17 @@ def _has_campus_evidence(item: dict, profile: dict) -> bool:
     return _matches_terms(_candidate_text(item), terms)
 
 
+def _has_spatial_campus_evidence(item: dict) -> bool:
+    """Use the already-enforced campus boundary/radius decision as evidence."""
+    evidence = item.get("evidence") or {}
+    if not isinstance(evidence, dict):
+        return False
+    return (
+        evidence.get("campusMembershipMethod") in {"polygon", "radius_fallback"}
+        and evidence.get("campusMembershipRelation", "inside") in {"inside", "boundary"}
+    )
+
+
 def _scoped_keyword(profile: dict, keyword: str) -> str:
     school_info = profile.get("school") or {}
     # Profiles discovered from natural language should already contain clean
@@ -207,14 +231,16 @@ def _scoped_keyword(profile: dict, keyword: str) -> str:
 
 
 def _search_queries(profile: dict, theme: str, keywords: list[str]) -> list[str]:
-    """Build a small, reproducible search budget for one campus request."""
+    """Build a diverse, reproducible search budget for one campus request."""
     scope = _scoped_keyword(profile, "")
     theme_terms = THEME_SEARCH_TERMS.get(theme) or THEME_SEARCH_TERMS["general"]
-    focused = " ".join(keywords[:6])
+    focused = " ".join(keywords[:8])
     return list(dict.fromkeys(filter(None, (
         f"{scope} {theme_terms}".strip(),
+        f"{scope} 校园地图 校园导览 景点".strip(),
         f"{scope} {focused}".strip(),
-    ))))[:2]
+        f"{scope} 官网 校园风光 {theme_terms}".strip(),
+    ))))[:4]
 
 
 def _search_hit_dict(hit) -> dict:
@@ -242,6 +268,25 @@ def _matchable_name(value: str) -> str:
 def _keyword_matches_candidate(item: dict, keyword: str) -> bool:
     aliases = SCENE_TERM_ALIASES.get(keyword, (keyword,))
     return _matches_terms(_candidate_text(item), aliases)
+
+
+def _date_candidate_is_suitable(item: dict) -> bool:
+    """Exclude ordinary teaching/office facilities from date heatmaps."""
+    text = _candidate_text(item)
+    if _matches_terms(text, DATE_UNSUITABLE_TERMS):
+        return False
+    # A generic building keyword can return many academic buildings.  Allow
+    # named cultural/landmark facilities, but reject unqualified building POIs.
+    if _matches_terms(text, DATE_GENERIC_BUILDING_TERMS):
+        return _matches_terms(text, ("图书馆", "会堂", "展馆", "博物馆", "艺术中心", "美术馆", "校门", "广场"))
+    return True
+
+
+def _scene_commercial_terms(theme: str) -> tuple[str, ...]:
+    """Keep campus coffee shops as date candidates while filtering businesses."""
+    if theme == "date":
+        return tuple(term for term in COMMERCIAL_TERMS if term != "咖啡店")
+    return COMMERCIAL_TERMS
 
 
 def _registry_paths(profile: dict, primary: Path) -> list[Path]:
@@ -625,7 +670,9 @@ class CampusSceneHarvester:
                     item.get("name"), item.get("locationName"), item.get("subCategory"),
                     (item.get("meta") or {}).get("amapType"),
                 ))
-                if _matches_terms(registry_text, NON_SCENIC_REGISTRY_TERMS):
+                if (_matches_terms(registry_text, NON_SCENIC_REGISTRY_TERMS) or
+                        (self.scene == "date" and
+                         _matches_terms(registry_text, DATE_UNSUITABLE_TERMS))):
                     continue
                 seen.add(item.get("id"))
                 candidate = dict(item)
@@ -658,7 +705,9 @@ class PlantSupplementHarvester(AmapPoiHarvester):
             haystack += " " + str(evidence.get("address") or "")
             if any(term in haystack for term in self._EXCLUDED_TERMS):
                 continue
-            if any(term in haystack for term in self._PLANT_TERMS) and _has_campus_evidence(item, self.profile):
+            if any(term in haystack for term in self._PLANT_TERMS) and (
+                    _has_campus_evidence(item, self.profile) or
+                    _has_spatial_campus_evidence(item)):
                 item["category"] = "plant"
                 item["source"] = self.source
                 item["confidence"] = min(float(item.get("confidence", 0.72)), 0.68)
@@ -722,12 +771,19 @@ class SceneSupplementHarvester(AmapPoiHarvester):
         self.terms = tuple(THEME_KEYWORDS.get(theme) or THEME_KEYWORDS["general"])
 
     def _collect_keyword(self, keyword: str):
-        candidates, warnings = super()._collect_keyword(_scoped_keyword(self.profile, keyword))
+        # Keep the raw category term for candidate matching.  The provider
+        # query is campus-scoped, but that full query must not be required in
+        # an ordinary POI name such as “东区体育馆”.
+        raw_keyword = keyword
+        candidates, warnings = super()._collect_keyword(_scoped_keyword(self.profile, raw_keyword))
         filtered = []
         for item in candidates:
             text = _candidate_text(item)
-            if (_matches_terms(text, COMMERCIAL_TERMS) or not _keyword_matches_candidate(item, keyword) or
-                    not _has_campus_evidence(item, self.profile)):
+            if (_matches_terms(text, _scene_commercial_terms(self.theme)) or
+                    (self.theme == "date" and not _date_candidate_is_suitable(item)) or
+                    not _keyword_matches_candidate(item, raw_keyword) or
+                    not (_has_campus_evidence(item, self.profile) or
+                         _has_spatial_campus_evidence(item))):
                 continue
             candidate = dict(item)
             candidate.update({
@@ -761,7 +817,9 @@ class SceneWebHarvester:
         excluded = 0
         for item in result.candidates:
             text = _candidate_text(item)
-            if (_matches_terms(text, COMMERCIAL_TERMS) or not _matches_terms(text, self.terms) or
+            if (_matches_terms(text, _scene_commercial_terms(self.theme)) or
+                    (self.theme == "date" and not _date_candidate_is_suitable(item)) or
+                    not _matches_terms(text, self.terms) or
                     (self.profile is not None and not _has_campus_evidence(item, self.profile))):
                 excluded += 1
                 continue
@@ -895,7 +953,10 @@ class DiscoveryOrchestrator:
         if theme != "flower":
             selected.extend(THEME_KEYWORDS.get(theme) or THEME_KEYWORDS["general"])
         selected.extend(str(item).strip() for item in (keywords or []) if str(item).strip())
-        selected = list(dict.fromkeys(selected))[:20]
+        # A date request combines plant signals with a broader set of scenic
+        # categories. Keep enough terms for all of them; the harvester still
+        # applies provider/page limits and the review gate remains unchanged.
+        selected = list(dict.fromkeys(selected))[:28]
         manual_urls = list(dict.fromkeys(
             str(item).strip() for item in (web_urls or []) if str(item).strip()
         ))[:10]

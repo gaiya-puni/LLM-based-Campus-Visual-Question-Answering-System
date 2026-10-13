@@ -757,7 +757,7 @@ def chat():
                 if heat_payload['places']:
                     return jsonify(heatmap_chat_response(heat_payload))
                 heatmap_fallback = '该场景暂无有依据的热区推荐，使用原有规则推荐'
-            except HeatmapUnavailable as exc:
+            except (HeatmapUnavailable, ValueError) as exc:
                 heatmap_fallback = str(exc)
 
     # 场景类问题无精确匹配时，注入代表性植物作为兜底上下文

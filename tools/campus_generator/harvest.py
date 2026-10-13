@@ -181,7 +181,7 @@ class AmapPoiHarvester:
     endpoint = "https://restapi.amap.com/v3/place/around"
 
     def __init__(self, profile: dict, keywords: list[str], api_key: str | None = None,
-                 cache: HarvestCache | None = None, *, max_pages: int = 2,
+                 cache: HarvestCache | None = None, *, max_pages: int = 3,
                  page_size: int = 25, timeout: float = 10,
                  request_json: Callable | None = None,
                  request_interval_seconds: float | None = None,
@@ -191,7 +191,7 @@ class AmapPoiHarvester:
                  sleep: Callable[[float], None] = time.sleep,
                  monotonic: Callable[[], float] = time.monotonic):
         self.profile = profile
-        self.keywords = list(dict.fromkeys(str(k).strip() for k in keywords if str(k).strip()))[:20]
+        self.keywords = list(dict.fromkeys(str(k).strip() for k in keywords if str(k).strip()))[:28]
         self.api_key = (api_key or os.getenv("AMAP_WEB_SERVICE_KEY", "")).strip()
         self.cache = cache
         self.max_pages = min(max(int(max_pages), 1), 5)

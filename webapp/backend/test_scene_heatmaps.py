@@ -183,6 +183,64 @@ class HeatmapMathTests(unittest.TestCase):
         self.assertTrue(np.isfinite(field).all())
         self.assertEqual(field.max(), 0)
 
+    def test_campus_display_covers_sparse_points_without_faking_scores(self):
+        sparse = copy.deepcopy(self.pois)
+        lng, lat = hm.to_lnglat([0, 700], self.center)
+        sparse.append(dict(sparse[-1], id='remote', lng=lng, lat=lat))
+        geometry = hm.prepare_geometry(sparse, '普陀', self.config)
+        payload = hm.build_map(geometry, 'walk', {'甲': .8})
+        field, _, _ = hm.fuse_fields(geometry, {'甲': .8}, scene='walk')
+        values = np.asarray(payload['grid']['values'])
+        coverage = np.asarray(payload['grid']['coverage'])
+        remote = geometry['mask'] & (geometry['grid'][:, 1] > 600)
+        self.assertTrue(remote.any())
+        self.assertTrue((values[remote] == 0).all())
+        self.assertTrue((coverage[remote] == 1000).all())
+        np.testing.assert_array_equal(values[geometry['mask']], np.rint(field[geometry['mask']] * 1000))
+        self.assertTrue((coverage[~geometry['mask']] == 0).all())
+        self.assertTrue((coverage[geometry['mask']] == 1000).all())
+        hm.validate_payload(payload, '普陀', 'walk')
+        empty = hm.build_map(geometry, 'walk', {})
+        self.assertEqual(empty['places'], [])
+        self.assertFalse(any(empty['grid']['coverage']))
+
+    def test_display_coverage_restores_original_data_footprint(self):
+        first = hm.prepare_geometry(self.pois, '普陀', self.config)
+        config = copy.deepcopy(self.config)
+        config['campuses']['普陀'].pop('displayCoverage')
+        second = hm.prepare_geometry(self.pois, '普陀', config)
+        self.assertEqual(first['bounds'], second['bounds'])
+        np.testing.assert_array_equal(first['mask'], second['mask'])
+        expected = hm.inside_hull(first['grid'], hm.convex_hull(first['xy']))
+        distance = np.linalg.norm(first['grid'][:, None, :] - first['xy'][None, :, :], axis=2)
+        expected &= distance.min(axis=1) <= self.config['supportMeters']
+        np.testing.assert_array_equal(first['mask'], expected)
+        self.assertLess(first['width'], 30)
+        for similarities in ({'甲': .8}, {'乙': .9}):
+            payload = hm.build_map(first, 'walk', similarities)
+            original = hm.build_map(second, 'walk', similarities)
+            np.testing.assert_array_equal(np.asarray(payload['grid']['values']) != -1, expected)
+            self.assertEqual(payload['grid']['values'], original['grid']['values'])
+            self.assertEqual(payload['places'], original['places'])
+
+    def test_preview_without_display_coverage_keeps_poi_supported_geometry(self):
+        config = copy.deepcopy(self.config)
+        config['campuses']['普陀'].pop('displayCoverage')
+        geometry = hm.prepare_geometry(self.pois, '普陀', config)
+        self.assertLess(geometry['width'], 30)
+        payload = hm.build_map(geometry, 'walk', {'甲': .8})
+        self.assertNotIn('coverage', payload['grid'])
+        self.assertEqual(payload['boundarySource'], 'poi_convex_hull_with_support_mask')
+
+    def test_malformed_coverage_is_rejected(self):
+        payload = hm.build_map(hm.prepare_geometry(self.pois, '普陀', self.config), 'walk', {'甲': .8})
+        for coverage in ([0], [float('nan')] * len(payload['grid']['values']),
+                         [1001] * len(payload['grid']['values'])):
+            broken = copy.deepcopy(payload)
+            broken['grid']['coverage'] = coverage
+            with self.assertRaises(ValueError):
+                hm.validate_payload(broken, '普陀', 'walk')
+
     def test_scene_output_is_independent_of_other_scene_results(self):
         geometry = hm.prepare_geometry(self.pois, '普陀', self.config, scene='walk')
         first = hm.build_map(geometry, 'walk', {'甲': .8, '乙': .3})
@@ -221,6 +279,13 @@ class HeatmapMathTests(unittest.TestCase):
         self.assertTrue(any(beta < 0 for beta in betas.values()))
         self.assertTrue(np.isfinite(field).all())
 
+    def test_formal_clip_mode_keeps_original_category_cutoff(self):
+        geometry = hm.prepare_geometry(self.pois, '普陀', self.config, scene='date')
+        field, contributions, betas = hm.fuse_fields(geometry, {'甲': .8, '乙': .3})
+        self.assertTrue(np.isfinite(field).all())
+        self.assertEqual(betas['乙'], 0)
+        self.assertFalse(np.any(contributions['乙'] > 0))
+
     def test_poi_sources_are_sorted_and_new_campus_changes_fingerprint(self):
         with tempfile.TemporaryDirectory() as directory:
             project = Path(directory)
@@ -252,14 +317,11 @@ class HeatmapMathTests(unittest.TestCase):
             (BASE / 'heatmap_cache' / 'manifest.json').read_text(encoding='utf-8'))
 
         self.assertEqual(manifest['sourceHash'], hm.fingerprint(BASE, manifest['model']))
-        self.assertEqual(manifest['mapCount'], 26)
+        self.assertEqual(manifest['mapCount'], 20)
         self.assertEqual(manifest['audit']['byCampus'], {
-            '普陀': 1515, '闵行': 1476, '交大闵行': 17,
+            '普陀': 1515, '闵行': 1476,
         })
-        self.assertEqual(
-            set((manifest.get('skippedHeatmaps') or {}).get('交大闵行') or {}),
-            {'flower_viewing'},
-        )
+        self.assertEqual(manifest.get('skippedHeatmaps'), {})
 
     def test_load_pois_merges_all_discovered_files_in_order(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -290,7 +352,7 @@ class HeatmapMathTests(unittest.TestCase):
             store = hm.HeatmapStore(root)
             with self.assertRaises(hm.HeatmapUnavailable):
                 store.get('普陀', 'walk')
-            with self.assertRaises(hm.HeatmapUnavailable):
+            with self.assertRaises(ValueError):
                 store.get('交大闵行', 'walk')
             store.cache.mkdir()
             (store.cache / 'manifest.json').write_text('{"sourceHash":"old"}', encoding='utf-8')
@@ -322,19 +384,19 @@ class HeatmapMathTests(unittest.TestCase):
             (root / 'heatmap_config.json').write_text(json.dumps(self.config), encoding='utf-8')
             store = hm.HeatmapStore(root)
             store.cache.mkdir()
-            reason = '交大闵行: insufficient spatial coverage'
+            reason = '普陀: insufficient spatial coverage'
             manifest = {
                 'algorithm': hm.ALGORITHM_VERSION,
                 'model': store.model,
                 'sourceHash': 'current',
-                'skippedHeatmaps': {'交大闵行': {'flower_viewing': reason}},
+                'skippedHeatmaps': {'普陀': {'flower_viewing': reason}},
             }
             (store.cache / 'manifest.json').write_text(
                 json.dumps(manifest, ensure_ascii=False), encoding='utf-8')
 
             with patch.object(hm, 'fingerprint', return_value='current'):
                 with self.assertRaises(hm.HeatmapUnavailable) as raised:
-                    store.get('交大闵行', 'flower_viewing')
+                    store.get('普陀', 'flower_viewing')
             self.assertIn(reason, str(raised.exception))
 
     def test_valid_json_with_broken_grid_or_wrong_campus_is_rejected(self):
@@ -379,7 +441,7 @@ class HeatmapApiTests(unittest.TestCase):
             'messages': [{'role': 'user', 'content': query}], 'userCampus': '普陀', **kwargs})
 
     def test_new_mode_all_four_scenes_and_configured_campuses(self):
-        for campus in campus_config.campus_names():
+        for campus in campus_config.qa_campus_names():
             for word, scene in [('赏花','flower_viewing'), ('拍照','photo'), ('散步','walk'), ('约会','date')]:
                 payload = {'scene': scene, 'sceneName': word, 'campus': campus, 'disclaimer': hm.DISCLAIMER,
                            'places': [{'name': '已有点位周边', 'rank': 1, 'reason': '真实点位依据'}]}
@@ -437,8 +499,15 @@ class HeatmapApiTests(unittest.TestCase):
         self.assertEqual(response.json['recommendation_engine'], 'rule')
         self.assertEqual(response.json['heatmap_status'], '缓存不可用')
 
+    def test_removed_chat_campus_falls_back_without_server_error(self):
+        with patch.object(self.server._HEATMAP_STORE, 'get', side_effect=ValueError('校区未启用热图')):
+            response = self.chat('交大闵行校区哪里适合散步', recommendationMode='sakde')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json['heatmap_status'], '校区未启用热图')
+
     def test_http_validation_and_missing_cache(self):
         self.assertEqual(self.client.get('/api/heatmaps?campus=bad&scene=walk').status_code, 400)
+        self.assertEqual(self.client.get('/api/heatmaps?campus=交大闵行&scene=walk').status_code, 400)
         with patch.object(self.server._HEATMAP_STORE, 'get', side_effect=hm.HeatmapUnavailable('未生成')):
             self.assertEqual(self.client.get('/api/heatmaps?campus=普陀&scene=walk').status_code, 503)
 

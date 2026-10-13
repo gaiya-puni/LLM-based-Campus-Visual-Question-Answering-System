@@ -66,30 +66,18 @@ export const CAMPUSES: CampusInfo[] = [
     trustRadiusM: 2200,
     waterName: "樱桃河",
   },
-  {
-    name: "交大闵行",
-    slug: "sjtu_minhang",
-    school: "sjtu",
-    schoolName: "上海交通大学",
-    aliases: ["交大闵行校区", "闵行本部", "闵行本部校区"],
-    center: [121.436882, 31.025626],
-    trustRadiusM: 1800,
-    waterName: "思源湖",
-  },
 ];
 
-export const DEFAULT_CAMPUS = "交大闵行";
+export const DEFAULT_CAMPUS = "普陀";
 
 export const CAMPUS_CENTERS: Record<string, [number, number]> = {
   "普陀": [121.406079, 31.227073],
   "闵行": [121.453725, 31.03148],
-  "交大闵行": [121.436882, 31.025626],
 };
 
 export const CAMPUS_LOCATION_RADIUS_M: Record<string, number> = {
   "普陀": 1300,
   "闵行": 2200,
-  "交大闵行": 1800,
 };
 
-export const CAMPUS_NAMES: string[] = ["普陀", "闵行", "交大闵行"];
+export const CAMPUS_NAMES: string[] = ["普陀", "闵行"];

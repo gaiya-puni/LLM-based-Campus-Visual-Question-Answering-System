@@ -30,7 +30,7 @@
       ]
     }
   },
-  "defaultCampus": "交大闵行",
+  "defaultCampus": "普陀",
   "campuses": [
     {
       "name": "普陀",
@@ -70,6 +70,7 @@
       "name": "交大闵行",
       "slug": "sjtu_minhang",
       "school": "sjtu",
+      "qaEnabled": false,
       "aliases": [
         "交大闵行校区",
         "闵行本部",

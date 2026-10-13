@@ -24,14 +24,20 @@ class CampusConfigAssetTests(unittest.TestCase):
         runtime = campus_config.config()
         heatmap = json.loads(
             Path(campus_config.HEATMAP_CONFIG_PATH).read_text(encoding='utf-8'))
-        self.assertEqual(set(heatmap['campuses']), set(campus_config.campus_names()))
-        for item in runtime['campuses']:
+        self.assertEqual(set(heatmap['campuses']), set(campus_config.qa_campus_names()))
+        for item in campus_config.qa_campuses():
             heat_item = heatmap['campuses'][item['name']]
             self.assertEqual(heat_item['slug'], item['slug'])
             self.assertEqual(heat_item['center'], item['center'])
             self.assertIsInstance(heat_item['auditRadiusMeters'], (int, float))
             self.assertNotIsInstance(heat_item['auditRadiusMeters'], bool)
             self.assertGreater(heat_item['auditRadiusMeters'], 0)
+
+    def test_chat_offers_only_ecnu_campuses_but_agent_registry_is_preserved(self):
+        self.assertEqual(campus_config.qa_campus_names(), ['普陀', '闵行'])
+        self.assertEqual(campus_config.default_campus(), '普陀')
+        self.assertIn('交大闵行', campus_config.campus_names())
+        self.assertNotIn('交大闵行', campus_config.render_frontend_ts().split('export const CAMPUSES')[1])
 
     def test_default_uniqueness_and_school_foreign_keys(self):
         items = campus_config.campuses()

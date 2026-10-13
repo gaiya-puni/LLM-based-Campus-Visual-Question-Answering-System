@@ -291,7 +291,7 @@ def submit_campus_discovery():
                     cache,
                     max_results=int(os.getenv('WEB_SEARCH_MAX_RESULTS', '10')),
                     per_domain_limit=int(os.getenv('WEB_SEARCH_PER_DOMAIN_LIMIT', '2')),
-                    max_queries=int(os.getenv('WEB_SEARCH_MAX_QUERIES', '2')),
+                    max_queries=int(os.getenv('WEB_SEARCH_MAX_QUERIES', '4')),
                     timeout=float(os.getenv('WEB_SEARCH_TIMEOUT', '8')),
                 )
         orchestrator = DiscoveryOrchestrator(

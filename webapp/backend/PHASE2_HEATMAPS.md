@@ -3,8 +3,9 @@
 ## 范围与启动
 
 只实现赏花、拍照、散步休息、浪漫约会，按 `heatmap_config.json` 中的校区动态构建。
-华师普陀、华师闵行四场景均可用；交大闵行支持拍照、散步和约会，赏花因没有植物点位明确降级。
-季节场景按春夏秋冬分别缓存，当前共 26 份有效地图产物。
+智能问答只提供华师普陀、华师闵行，四场景均可用，默认普陀。
+季节场景按春夏秋冬分别缓存，当前共 20 份有效地图产物。
+交大闵行以 `qaEnabled: false` 留在内部注册表，供智能体动态解析使用，不显示在问答页。
 不修改原有POI、场景语料、向量索引或规则排序函数；不包含分时停车。
 
 在 `webapp/backend` 执行：
@@ -37,7 +38,7 @@ python build_scene_heatmaps.py --allow-download
 
 ## 方法及论文适配
 
-参考 SenseMap (IEEE TVCG 2024) IV-C/D/E，当前方法版本为 `sakde-campus-8-independent`，
+参考 SenseMap (IEEE TVCG 2024) IV-C/D/E，当前方法版本为 `sakde-campus-11-poi-coverage-display`，
 不是宣称逐项复现原文城市实验。
 
 1. POI细分类使用植物物种 `subCategory`。类语料使用已有植物模板的名称、科、习性、形态、文化与生长描述，
@@ -56,7 +57,7 @@ python build_scene_heatmaps.py --allow-download
    注意：分类Min-Max会消去beta正值的幅度，保留正负方向；实现和解释均不把幅度再算一次。
 6. 最终每校区、每场景单独归一化。显示0~100相对强度，不是置信概率，不能跨校区/跨场景比较绝对高低。
 
-20米显示网格与200米统计分区是不同概念。参数集中在 `heatmap_config.json`。
+12米显示网格与200米统计分区是不同概念。参数集中在 `heatmap_config.json`。
 配置、场景语料、POI、模板、算法源码和模型标识被哈希绑定；这些内容变更必须重新构建。
 缓存先逐张写入，最后提交manifest，避免读到混合版本。
 
@@ -64,8 +65,12 @@ python build_scene_heatmaps.py --allow-download
 
 - 去除重复ID、同物种同坐标记录、非法坐标、远离所属校区的点以及已知跨校区错名。
   仅第二阶段排除，不改原始文件。检查结果见manifest的audit。
-- 未获得正式校界/TAZ/路网数据：当前采用POI凸包与100米邻近支持区交集作为**数据覆盖掩膜**，
-  不能称其为正式校界或可通行范围。图像外和无数据区域透明。
+- 未获得正式校界/TAZ/路网数据：问答页恢复旧版的POI凸包与100米邻近支持区，
+  不再使用中心点加圆形半径扩大范围。边缘是数据覆盖轮廓，不是正式校界或可通行范围。
+  `displayCoverage=true` 时独立 `grid.coverage` 为范围内的淡蓝背景，不进入 `grid.values`、
+  推荐评分或地点排序；无有效热度时不展示背景。前端模糊后按原始noData掩膜裁剪，
+  防止颜色扩散到数据覆盖范围外；内部不画等值线。
+- 智能体预览显式去除 `displayCoverage`，保持独立的支持距离、评分和渲染策略。
 - 对热图做局部高值搜索和最小间距去重，90米内关联真实POI作为参考标记，标记不放在算法生成的虚构点。
 - 地点名称来自该POI的 `locationName`，不能从“河边、桥”推断出特定河名。
 - 无路网情况下不保证参考POI可直接步行到达，界面明确提示，不能把热图等同于导航路线。
@@ -78,6 +83,7 @@ python build_scene_heatmaps.py --allow-download
 
 成功返回 `algorithm/campus/scene/grid/places/classContributions/disclaimer/sourceHash`。
 grid包含宽高、图像边界 `[west,south,east,north]`、北向南逐行的0~1000值及无数据值-1。
+问答页还包含同尺寸的 `coverage`（0~1000），仅用来绘制柔和校区背景。
 前端将这个栅格直接绘成PNG并用高德ImageLayer叠加，不再使用高德热力插件进行二次KDE。
 参数错误400，缓存不可用503；不接受任意文件路径。
 
