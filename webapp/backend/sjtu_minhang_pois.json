@@ -1,0 +1,2248 @@
+[
+  {
+    "id": "college_sjtu_minhang_上海交通大学闵行校区学生宿舍东28号楼",
+    "category": "college",
+    "subCategory": "宿舍",
+    "name": "上海交通大学闵行校区学生宿舍-东28号楼",
+    "locationName": "上海交通大学闵行校区学生宿舍-东28号楼",
+    "lng": 121.434125,
+    "lat": 31.017875,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学闵行校区学生宿舍-东28号楼 宿舍 college 交大闵行 上海交通大学",
+    "tags": [
+      "宿舍",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "精勤路与南洋南路交叉口东南200米",
+      "amapType": "商务住宅;住宅区;宿舍",
+      "amapId": "B0M27MJTWZ",
+      "aliases": [
+        "上海交通大学闵行校区学生宿舍-东28号楼"
+      ],
+      "notes": "高德采集，距校区中心 896 米"
+    }
+  },
+  {
+    "id": "college_sjtu_minhang_上海交通大学材料创新大楼",
+    "category": "college",
+    "subCategory": "教学楼",
+    "name": "上海交通大学材料创新大楼",
+    "locationName": "上海交通大学材料创新大楼",
+    "lng": 121.427776,
+    "lat": 31.022322,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学材料创新大楼 教学楼 college 交大闵行 上海交通大学",
+    "tags": [
+      "教学楼",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "江川路街道东川路80号",
+      "amapType": "商务住宅;楼宇;商务写字楼|科教文化服务;科教文化场所;科教文化场所",
+      "amapId": "B0LKS5HSFA",
+      "aliases": [
+        "上海交通大学材料创新大楼"
+      ],
+      "notes": "高德采集，距校区中心 942 米"
+    }
+  },
+  {
+    "id": "scene_sjtu_minhang_上海交通大学国家大学科技园",
+    "category": "scene",
+    "subCategory": "开敞空间",
+    "name": "上海交通大学国家大学科技园",
+    "locationName": "上海交通大学国家大学科技园",
+    "lng": 121.428114,
+    "lat": 31.029497,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学国家大学科技园 开敞空间 scene 交大闵行 上海交通大学",
+    "tags": [
+      "开敞空间",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "剑川路与S32申嘉湖高速出口交叉口西200米",
+      "amapType": "商务住宅;产业园区;产业园区",
+      "amapId": "B0IG4A1XNX",
+      "aliases": [
+        "上海交通大学国家大学科技园"
+      ],
+      "notes": "高德采集，距校区中心 940 米"
+    },
+    "scenes": [
+      "walk",
+      "photo"
+    ],
+    "sceneWeight": 1.0
+  },
+  {
+    "id": "scene_sjtu_minhang_上海交通大学生活园区管理中心",
+    "category": "scene",
+    "subCategory": "开敞空间",
+    "name": "上海交通大学生活园区管理中心",
+    "locationName": "上海交通大学生活园区管理中心",
+    "lng": 121.43126,
+    "lat": 31.025348,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学生活园区管理中心 开敞空间 scene 交大闵行 上海交通大学",
+    "tags": [
+      "开敞空间",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800号上海交通大学(闵行本部校区)",
+      "amapType": "生活服务;生活服务场所;生活服务场所",
+      "amapId": "B0K377RKMM",
+      "aliases": [
+        "上海交通大学生活园区管理中心"
+      ],
+      "notes": "高德采集，距校区中心 537 米"
+    },
+    "scenes": [
+      "walk",
+      "photo"
+    ],
+    "sceneWeight": 1.0
+  },
+  {
+    "id": "college_sjtu_minhang_微电子大楼",
+    "category": "college",
+    "subCategory": "教学楼",
+    "name": "上海交通大学交大闵行 微电子大楼",
+    "locationName": "微电子大楼",
+    "lng": 121.437075,
+    "lat": 31.026175,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学交大闵行 微电子大楼 微电子大楼 教学楼 college 交大闵行 上海交通大学",
+    "tags": [
+      "教学楼",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "宣怀大道与元培路交叉口北100米",
+      "amapType": "商务住宅;楼宇;商务写字楼",
+      "amapId": "B0MRZ155T7",
+      "aliases": [
+        "微电子大楼"
+      ],
+      "notes": "高德采集，距校区中心 63 米"
+    }
+  },
+  {
+    "id": "scene_sjtu_minhang_校园咖啡龙坡路",
+    "category": "scene",
+    "subCategory": "开敞空间",
+    "name": "上海交通大学交大闵行 校园咖啡(龙坡路)",
+    "locationName": "校园咖啡(龙坡路)",
+    "lng": 121.440826,
+    "lat": 31.023697,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学交大闵行 校园咖啡(龙坡路) 校园咖啡(龙坡路) 开敞空间 scene 交大闵行 上海交通大学",
+    "tags": [
+      "开敞空间",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800上海交通大学闵行校区",
+      "amapType": "餐饮服务;咖啡厅;咖啡厅",
+      "amapId": "B00155M6IV",
+      "aliases": [
+        "校园咖啡(龙坡路)"
+      ],
+      "notes": "高德采集，距校区中心 432 米"
+    },
+    "scenes": [
+      "walk",
+      "photo"
+    ],
+    "sceneWeight": 1.0
+  },
+  {
+    "id": "parking_sjtu_minhang_智慧能源创新学院二轮电动车充电站",
+    "category": "parking",
+    "subCategory": "停车场",
+    "name": "上海交通大学交大闵行 智慧能源创新学院二轮电动车充电站",
+    "locationName": "智慧能源创新学院二轮电动车充电站",
+    "lng": 121.434106,
+    "lat": 31.028968,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学交大闵行 智慧能源创新学院二轮电动车充电站 智慧能源创新学院二轮电动车充电站 停车场 parking 交大闵行 上海交通大学",
+    "tags": [
+      "停车场",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800号",
+      "amapType": "生活服务;电动自动车充电站;电动自行车充电站",
+      "amapId": "B0MA17FB5B",
+      "aliases": [
+        "智慧能源创新学院二轮电动车充电站"
+      ],
+      "notes": "高德采集，距校区中心 454 米"
+    }
+  },
+  {
+    "id": "scene_sjtu_minhang_东湖面馆龙坡路",
+    "category": "scene",
+    "subCategory": "水景",
+    "name": "上海交通大学交大闵行 东湖面馆(龙坡路)",
+    "locationName": "东湖面馆(龙坡路)",
+    "lng": 121.441101,
+    "lat": 31.023688,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学交大闵行 东湖面馆(龙坡路) 东湖面馆(龙坡路) 水景 scene 交大闵行 上海交通大学",
+    "tags": [
+      "水景",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "吴泾镇东川路800号上海交通大学闵行校区第五餐饮大楼",
+      "amapType": "餐饮服务;中餐厅;中餐厅",
+      "amapId": "B0FFFPM2ZP",
+      "aliases": [
+        "东湖面馆(龙坡路)"
+      ],
+      "notes": "高德采集，距校区中心 456 米"
+    },
+    "scenes": [
+      "date",
+      "walk",
+      "photo"
+    ],
+    "sceneWeight": 1.0
+  },
+  {
+    "id": "college_sjtu_minhang_上海交通大学饮食服务中心",
+    "category": "college",
+    "subCategory": "教学楼",
+    "name": "上海交通大学-饮食服务中心",
+    "locationName": "上海交通大学-饮食服务中心",
+    "lng": 121.432118,
+    "lat": 31.022706,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学-饮食服务中心 教学楼 college 交大闵行 上海交通大学",
+    "tags": [
+      "教学楼",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "旭华路与光宪路交叉口南60米",
+      "amapType": "生活服务;生活服务场所;生活服务场所",
+      "amapId": "B0FFG8V1GI",
+      "aliases": [
+        "上海交通大学-饮食服务中心"
+      ],
+      "notes": "高德采集，距校区中心 557 米"
+    }
+  },
+  {
+    "id": "college_sjtu_minhang_系统生物医学研究大楼",
+    "category": "college",
+    "subCategory": "教学楼",
+    "name": "上海交通大学交大闵行 系统生物医学研究大楼",
+    "locationName": "系统生物医学研究大楼",
+    "lng": 121.440363,
+    "lat": 31.029685,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学交大闵行 系统生物医学研究大楼 系统生物医学研究大楼 教学楼 college 交大闵行 上海交通大学",
+    "tags": [
+      "教学楼",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800号上海交通大学闵行校区系统生物医学研究院",
+      "amapType": "商务住宅;楼宇;商务写字楼",
+      "amapId": "B0LK41Y4HZ",
+      "aliases": [
+        "系统生物医学研究大楼"
+      ],
+      "notes": "高德采集，距校区中心 558 米"
+    }
+  },
+  {
+    "id": "college_sjtu_minhang_上海交通大学闵行校区西宿舍区",
+    "category": "college",
+    "subCategory": "宿舍",
+    "name": "上海交通大学闵行校区西宿舍区",
+    "locationName": "上海交通大学闵行校区西宿舍区",
+    "lng": 121.432331,
+    "lat": 31.021592,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学闵行校区西宿舍区 宿舍 college 交大闵行 上海交通大学",
+    "tags": [
+      "宿舍",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800号上海交通大学(闵行本部校区)",
+      "amapType": "商务住宅;商务住宅相关;商务住宅相关",
+      "amapId": "B0FFJIJETT",
+      "aliases": [
+        "上海交通大学闵行校区西宿舍区"
+      ],
+      "notes": "高德采集，距校区中心 622 米"
+    }
+  },
+  {
+    "id": "college_sjtu_minhang_上海交通大学闵行校区国家电投智慧能源创新学院快递",
+    "category": "college",
+    "subCategory": "教学楼",
+    "name": "上海交通大学闵行校区国家电投智慧能源创新学院快递室",
+    "locationName": "上海交通大学闵行校区国家电投智慧能源创新学院快递室",
+    "lng": 121.434725,
+    "lat": 31.031125,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学闵行校区国家电投智慧能源创新学院快递室 教学楼 college 交大闵行 上海交通大学",
+    "tags": [
+      "教学楼",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "剑川路665号",
+      "amapType": "生活服务;物流速递;物流速递",
+      "amapId": "B0MA9CASIB",
+      "aliases": [
+        "上海交通大学闵行校区国家电投智慧能源创新学院快递室"
+      ],
+      "notes": "高德采集，距校区中心 642 米"
+    }
+  },
+  {
+    "id": "scene_sjtu_minhang_Tims咖啡交大文博楼店",
+    "category": "scene",
+    "subCategory": "文化场馆",
+    "name": "上海交通大学交大闵行 Tims咖啡(交大文博楼店)",
+    "locationName": "Tims咖啡(交大文博楼店)",
+    "lng": 121.448049,
+    "lat": 31.027563,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学交大闵行 Tims咖啡(交大文博楼店) Tims咖啡(交大文博楼店) 文化场馆 scene 交大闵行 上海交通大学",
+    "tags": [
+      "文化场馆",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800号上海交通大学闵行校区文博楼三楼",
+      "amapType": "餐饮服务;咖啡厅;咖啡厅",
+      "amapId": "B0HG7MLNFJ",
+      "aliases": [
+        "Tims咖啡(交大文博楼店)"
+      ],
+      "notes": "高德采集，距校区中心 1087 米"
+    },
+    "scenes": [
+      "date",
+      "photo"
+    ],
+    "sceneWeight": 1.0
+  },
+  {
+    "id": "college_sjtu_minhang_上海交通大学闵行校区南洋北苑",
+    "category": "college",
+    "subCategory": "宿舍",
+    "name": "上海交通大学闵行校区南洋北苑",
+    "locationName": "上海交通大学闵行校区南洋北苑",
+    "lng": 121.436648,
+    "lat": 31.03513,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学闵行校区南洋北苑 宿舍 college 交大闵行 上海交通大学",
+    "tags": [
+      "宿舍",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "张家里路360号",
+      "amapType": "商务住宅;住宅区;宿舍",
+      "amapId": "B0G06YO28F",
+      "aliases": [
+        "上海交通大学闵行校区南洋北苑"
+      ],
+      "notes": "高德采集，距校区中心 1051 米"
+    }
+  },
+  {
+    "id": "scene_sjtu_minhang_上海交通大学国家大学科技园F6栋",
+    "category": "scene",
+    "subCategory": "开敞空间",
+    "name": "上海交通大学国家大学科技园F6栋",
+    "locationName": "上海交通大学国家大学科技园F6栋",
+    "lng": 121.436975,
+    "lat": 31.033175,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学国家大学科技园F6栋 开敞空间 scene 交大闵行 上海交通大学",
+    "tags": [
+      "开敞空间",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "剑川路600号剑川路600号基地",
+      "amapType": "商务住宅;产业园区;产业园区",
+      "amapId": "B0L3ASUPNX",
+      "aliases": [
+        "上海交通大学国家大学科技园F6栋"
+      ],
+      "notes": "高德采集，距校区中心 834 米"
+    },
+    "scenes": [
+      "walk",
+      "photo"
+    ],
+    "sceneWeight": 1.0
+  },
+  {
+    "id": "college_sjtu_minhang_上海交通大学闵行校区学生中心大楼",
+    "category": "college",
+    "subCategory": "教学楼",
+    "name": "上海交通大学闵行校区学生中心大楼",
+    "locationName": "上海交通大学闵行校区学生中心大楼",
+    "lng": 121.433762,
+    "lat": 31.024947,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学闵行校区学生中心大楼 教学楼 college 交大闵行 上海交通大学 学生中心大楼",
+    "tags": [
+      "教学楼",
+      "交大闵行",
+      "上海交通大学",
+      "学生中心大楼"
+    ],
+    "meta": {
+      "address": "文俊路与思源北路交叉口南100米",
+      "amapType": "科教文化服务;学校;学校",
+      "amapId": "B0KALU9DQ6",
+      "aliases": [
+        "上海交通大学闵行校区学生中心大楼"
+      ],
+      "notes": "高德采集，距校区中心 307 米；公开资料佐证（置信度 0.85）",
+      "publicEvidence": {
+        "confidence": 0.85,
+        "quotes": [
+          "傍学生中心大楼"
+        ],
+        "sourceUrls": [
+          "https://baike.baidu.com/item/%E6%B6%B5%E6%B3%BD%E6%B9%96/7286549"
+        ]
+      }
+    }
+  },
+  {
+    "id": "college_sjtu_minhang_上海交通大学闵行校区致远学院",
+    "category": "college",
+    "subCategory": "教学楼",
+    "name": "上海交通大学闵行校区致远学院",
+    "locationName": "上海交通大学闵行校区致远学院",
+    "lng": 121.434499,
+    "lat": 31.023043,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学闵行校区致远学院 教学楼 college 交大闵行 上海交通大学",
+    "tags": [
+      "教学楼",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800号上海交通大学(闵行本部校区)",
+      "amapType": "科教文化服务;学校;高等院校",
+      "amapId": "B0J6P50XII",
+      "aliases": [
+        "上海交通大学闵行校区致远学院"
+      ],
+      "notes": "高德采集，距校区中心 365 米"
+    }
+  },
+  {
+    "id": "college_sjtu_minhang_上海交通大学闵行校区学生中心",
+    "category": "college",
+    "subCategory": "教学楼",
+    "name": "上海交通大学闵行校区学生中心",
+    "locationName": "上海交通大学闵行校区学生中心",
+    "lng": 121.433675,
+    "lat": 31.025475,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学闵行校区学生中心 教学楼 college 交大闵行 上海交通大学",
+    "tags": [
+      "教学楼",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "思源北路与学森路交叉口西南200米",
+      "amapType": "科教文化服务;学校;高等院校",
+      "amapId": "B0MR7LY7XN",
+      "aliases": [
+        "上海交通大学闵行校区学生中心"
+      ],
+      "notes": "高德采集，距校区中心 306 米"
+    }
+  },
+  {
+    "id": "college_sjtu_minhang_上海交通大学闵行校区创业学院",
+    "category": "college",
+    "subCategory": "教学楼",
+    "name": "上海交通大学闵行校区创业学院",
+    "locationName": "上海交通大学闵行校区创业学院",
+    "lng": 121.434914,
+    "lat": 31.026004,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学闵行校区创业学院 教学楼 college 交大闵行 上海交通大学",
+    "tags": [
+      "教学楼",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800号上海交通大学(闵行本部校区)",
+      "amapType": "科教文化服务;学校;高等院校",
+      "amapId": "B0FFG8UZCC",
+      "aliases": [
+        "上海交通大学闵行校区创业学院"
+      ],
+      "notes": "高德采集，距校区中心 192 米"
+    }
+  },
+  {
+    "id": "college_sjtu_minhang_上海交通大学闵行校区理科大楼",
+    "category": "college",
+    "subCategory": "教学楼",
+    "name": "上海交通大学闵行校区理科大楼",
+    "locationName": "上海交通大学闵行校区理科大楼",
+    "lng": 121.436875,
+    "lat": 31.025625,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学闵行校区理科大楼 教学楼 college 交大闵行 上海交通大学",
+    "tags": [
+      "教学楼",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "宣怀大道与元培路交叉口西北60米",
+      "amapType": "科教文化服务;学校;学校",
+      "amapId": "B0MU2LEOVA",
+      "aliases": [
+        "上海交通大学闵行校区理科大楼"
+      ],
+      "notes": "高德采集，距校区中心 1 米"
+    }
+  },
+  {
+    "id": "college_sjtu_minhang_上海交通大学闵行校区教学发展中心",
+    "category": "college",
+    "subCategory": "教学楼",
+    "name": "上海交通大学闵行校区教学发展中心",
+    "locationName": "上海交通大学闵行校区教学发展中心",
+    "lng": 121.437939,
+    "lat": 31.024705,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学闵行校区教学发展中心 教学楼 college 交大闵行 上海交通大学",
+    "tags": [
+      "教学楼",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800号上海交通大学(闵行本部校区)",
+      "amapType": "科教文化服务;学校;高等院校",
+      "amapId": "B0FFHHU41B",
+      "aliases": [
+        "上海交通大学闵行校区教学发展中心"
+      ],
+      "notes": "高德采集，距校区中心 143 米"
+    }
+  },
+  {
+    "id": "college_sjtu_minhang_上海交通大学闵行校区媒体与传播学院",
+    "category": "college",
+    "subCategory": "教学楼",
+    "name": "上海交通大学闵行校区媒体与传播学院",
+    "locationName": "上海交通大学闵行校区媒体与传播学院",
+    "lng": 121.439439,
+    "lat": 31.024078,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学闵行校区媒体与传播学院 教学楼 college 交大闵行 上海交通大学",
+    "tags": [
+      "教学楼",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800号上海交通大学(闵行本部校区)",
+      "amapType": "科教文化服务;学校;高等院校",
+      "amapId": "B0J6P50PRN",
+      "aliases": [
+        "上海交通大学闵行校区媒体与传播学院"
+      ],
+      "notes": "高德采集，距校区中心 298 米"
+    }
+  },
+  {
+    "id": "college_sjtu_minhang_上海交通大学闵行校区电气工程学院",
+    "category": "college",
+    "subCategory": "教学楼",
+    "name": "上海交通大学闵行校区电气工程学院",
+    "locationName": "上海交通大学闵行校区电气工程学院",
+    "lng": 121.440958,
+    "lat": 31.025965,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学闵行校区电气工程学院 教学楼 college 交大闵行 上海交通大学",
+    "tags": [
+      "教学楼",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "江川路街道东川路800号上海交通大学闵行校区电群1号楼",
+      "amapType": "科教文化服务;学校;高等院校",
+      "amapId": "B0FFF5VWNY",
+      "aliases": [
+        "上海交通大学闵行校区电气工程学院"
+      ],
+      "notes": "高德采集，距校区中心 391 米"
+    }
+  },
+  {
+    "id": "college_sjtu_minhang_上海交通大学闵行校区马克思主义学院",
+    "category": "college",
+    "subCategory": "教学楼",
+    "name": "上海交通大学闵行校区马克思主义学院",
+    "locationName": "上海交通大学闵行校区马克思主义学院",
+    "lng": 121.438776,
+    "lat": 31.023692,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学闵行校区马克思主义学院 教学楼 college 交大闵行 上海交通大学",
+    "tags": [
+      "教学楼",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800号上海交通大学(闵行本部校区)",
+      "amapType": "科教文化服务;学校;高等院校",
+      "amapId": "B0J6P51KJJ",
+      "aliases": [
+        "上海交通大学闵行校区马克思主义学院"
+      ],
+      "notes": "高德采集，距校区中心 280 米"
+    }
+  },
+  {
+    "id": "college_sjtu_minhang_上海交通大学闵行校区教育学院",
+    "category": "college",
+    "subCategory": "教学楼",
+    "name": "上海交通大学(闵行校区)-教育学院",
+    "locationName": "上海交通大学(闵行校区)-教育学院",
+    "lng": 121.438675,
+    "lat": 31.024425,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学(闵行校区)-教育学院 教学楼 college 交大闵行 上海交通大学",
+    "tags": [
+      "教学楼",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "上海交通大学闵行校区陈瑞球楼南门",
+      "amapType": "科教文化服务;学校;高等院校",
+      "amapId": "B0H2OUDMW6",
+      "aliases": [
+        "上海交通大学(闵行校区)-教育学院"
+      ],
+      "notes": "高德采集，距校区中心 216 米"
+    }
+  },
+  {
+    "id": "scene_sjtu_minhang_上海交通大学闵行校区园林植物标本园",
+    "category": "scene",
+    "subCategory": "园林景观",
+    "name": "上海交通大学闵行校区园林植物标本园",
+    "locationName": "上海交通大学闵行校区园林植物标本园",
+    "lng": 121.436279,
+    "lat": 31.027782,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学闵行校区园林植物标本园 园林景观 scene 交大闵行 上海交通大学",
+    "tags": [
+      "园林景观",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800号上海交通大学闵行校区",
+      "amapType": "风景名胜;公园广场;植物园|科教文化服务;科教文化场所;科教文化场所",
+      "amapId": "B0FFG8UZL5",
+      "aliases": [
+        "上海交通大学闵行校区园林植物标本园"
+      ],
+      "notes": "高德采集，距校区中心 245 米"
+    },
+    "scenes": [
+      "walk",
+      "photo"
+    ],
+    "sceneWeight": 1.0
+  },
+  {
+    "id": "college_sjtu_minhang_上海交通大学闵行校区网络信息中心",
+    "category": "college",
+    "subCategory": "教学楼",
+    "name": "上海交通大学闵行校区网络信息中心",
+    "locationName": "上海交通大学闵行校区网络信息中心",
+    "lng": 121.436911,
+    "lat": 31.025789,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学闵行校区网络信息中心 教学楼 college 交大闵行 上海交通大学",
+    "tags": [
+      "教学楼",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800上海交通大学闵行校区",
+      "amapType": "科教文化服务;学校;高等院校",
+      "amapId": "B0FFFGYU3M",
+      "aliases": [
+        "上海交通大学闵行校区网络信息中心"
+      ],
+      "notes": "高德采集，距校区中心 18 米"
+    }
+  },
+  {
+    "id": "college_sjtu_minhang_上海交通大学闵行校区电力集控中心",
+    "category": "college",
+    "subCategory": "教学楼",
+    "name": "上海交通大学闵行校区电力集控中心",
+    "locationName": "上海交通大学闵行校区电力集控中心",
+    "lng": 121.44042,
+    "lat": 31.025374,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学闵行校区电力集控中心 教学楼 college 交大闵行 上海交通大学",
+    "tags": [
+      "教学楼",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800号上海交通大学(闵行本部校区)",
+      "amapType": "科教文化服务;学校;高等院校",
+      "amapId": "B0FFHI3CEA",
+      "aliases": [
+        "上海交通大学闵行校区电力集控中心"
+      ],
+      "notes": "高德采集，距校区中心 339 米"
+    }
+  },
+  {
+    "id": "college_sjtu_minhang_上海交通大学闵行校区新行政楼A楼",
+    "category": "college",
+    "subCategory": "教学楼",
+    "name": "上海交通大学闵行校区新行政楼A楼",
+    "locationName": "上海交通大学闵行校区新行政楼A楼",
+    "lng": 121.437625,
+    "lat": 31.024275,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学闵行校区新行政楼A楼 教学楼 college 交大闵行 上海交通大学",
+    "tags": [
+      "教学楼",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "元培路与宣怀大道交叉口南120米",
+      "amapType": "科教文化服务;学校;学校",
+      "amapId": "B0MRB699RF",
+      "aliases": [
+        "上海交通大学闵行校区新行政楼A楼"
+      ],
+      "notes": "高德采集，距校区中心 165 米"
+    }
+  },
+  {
+    "id": "scene_sjtu_minhang_上海交通大学闵行校区2号网球场",
+    "category": "scene",
+    "subCategory": "运动场地",
+    "name": "上海交通大学闵行校区2号网球场",
+    "locationName": "上海交通大学闵行校区2号网球场",
+    "lng": 121.433752,
+    "lat": 31.027958,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学闵行校区2号网球场 运动场地 scene 交大闵行 上海交通大学",
+    "tags": [
+      "运动场地",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800号上海交通大学闵行校区",
+      "amapType": "体育休闲服务;运动场馆;网球场",
+      "amapId": "B0FFG57ZCE",
+      "aliases": [
+        "上海交通大学闵行校区2号网球场"
+      ],
+      "notes": "高德采集，距校区中心 394 米"
+    },
+    "scenes": [
+      "walk"
+    ],
+    "sceneWeight": 1.0
+  },
+  {
+    "id": "parking_sjtu_minhang_上海交通大学闵行校区内部地下停车场",
+    "category": "parking",
+    "subCategory": "停车场",
+    "name": "上海交通大学闵行校区内部地下停车场",
+    "locationName": "上海交通大学闵行校区内部地下停车场",
+    "lng": 121.440112,
+    "lat": 31.026844,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学闵行校区内部地下停车场 停车场 parking 交大闵行 上海交通大学",
+    "tags": [
+      "停车场",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800上海交通大学闵行校区",
+      "amapType": "交通设施服务;停车场;专用停车场",
+      "amapId": "B0FFGBABFU",
+      "aliases": [
+        "上海交通大学闵行校区内部地下停车场"
+      ],
+      "notes": "高德采集，距校区中心 336 米"
+    }
+  },
+  {
+    "id": "scene_sjtu_minhang_上海交通大学闵行校区园林树木园",
+    "category": "scene",
+    "subCategory": "园林景观",
+    "name": "上海交通大学闵行校区园林树木园",
+    "locationName": "上海交通大学闵行校区园林树木园",
+    "lng": 121.435558,
+    "lat": 31.028013,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学闵行校区园林树木园 园林景观 scene 交大闵行 上海交通大学",
+    "tags": [
+      "园林景观",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800号上海交通大学闵行校区",
+      "amapType": "风景名胜;公园广场;植物园",
+      "amapId": "B001577E08",
+      "aliases": [
+        "上海交通大学闵行校区园林树木园"
+      ],
+      "notes": "高德采集，距校区中心 292 米"
+    },
+    "scenes": [
+      "walk",
+      "photo"
+    ],
+    "sceneWeight": 1.0
+  },
+  {
+    "id": "college_sjtu_minhang_上海交通大学新行政楼",
+    "category": "college",
+    "subCategory": "教学楼",
+    "name": "上海交通大学新行政楼",
+    "locationName": "上海交通大学新行政楼",
+    "lng": 121.440175,
+    "lat": 31.027125,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学新行政楼 教学楼 college 交大闵行 上海交通大学 新行政楼",
+    "tags": [
+      "教学楼",
+      "交大闵行",
+      "上海交通大学",
+      "新行政楼"
+    ],
+    "meta": {
+      "address": "江川路街道东川路800号上海交通大学闵行校区新行政楼",
+      "amapType": "科教文化服务;学校;学校",
+      "amapId": "B0MUT1M92I",
+      "aliases": [
+        "上海交通大学新行政楼"
+      ],
+      "notes": "高德采集，距校区中心 355 米；公开资料佐证（置信度 0.85）",
+      "publicEvidence": {
+        "confidence": 0.85,
+        "quotes": [
+          "毗邻交大大草坪、新行政楼和新图书馆",
+          "新行政楼"
+        ],
+        "sourceUrls": [
+          "https://zhidao.baidu.com/question/444531802242709924.html",
+          "https://nsse.sjtu.edu.cn/Web/Content/90"
+        ]
+      }
+    }
+  },
+  {
+    "id": "parking_sjtu_minhang_上海交通大学闵行校区内部地面停车场",
+    "category": "parking",
+    "subCategory": "停车场",
+    "name": "上海交通大学闵行校区内部地面停车场",
+    "locationName": "上海交通大学闵行校区内部地面停车场",
+    "lng": 121.439517,
+    "lat": 31.024174,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学闵行校区内部地面停车场 停车场 parking 交大闵行 上海交通大学",
+    "tags": [
+      "停车场",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800号上海交通大学(闵行本部校区)",
+      "amapType": "交通设施服务;停车场;专用停车场",
+      "amapId": "B0FFGBA7XZ",
+      "aliases": [
+        "上海交通大学闵行校区内部地面停车场"
+      ],
+      "notes": "高德采集，距校区中心 298 米"
+    }
+  },
+  {
+    "id": "parking_sjtu_minhang_上海交通大学闵行本部校区内部地面停车场",
+    "category": "parking",
+    "subCategory": "停车场",
+    "name": "上海交通大学闵行本部校区内部地面停车场",
+    "locationName": "上海交通大学闵行本部校区内部地面停车场",
+    "lng": 121.440436,
+    "lat": 31.025236,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学闵行本部校区内部地面停车场 停车场 parking 交大闵行 上海交通大学",
+    "tags": [
+      "停车场",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800上海交通大学闵行校区",
+      "amapType": "交通设施服务;停车场;专用停车场",
+      "amapId": "B0FFG69X6U",
+      "aliases": [
+        "上海交通大学闵行本部校区内部地面停车场"
+      ],
+      "notes": "高德采集，距校区中心 342 米"
+    }
+  },
+  {
+    "id": "college_sjtu_minhang_上海交通大学闵行校区蔡翠菊教学楼",
+    "category": "college",
+    "subCategory": "教学楼",
+    "name": "上海交通大学闵行校区蔡翠菊教学楼",
+    "locationName": "上海交通大学闵行校区蔡翠菊教学楼",
+    "lng": 121.437273,
+    "lat": 31.024355,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学闵行校区蔡翠菊教学楼 教学楼 college 交大闵行 上海交通大学",
+    "tags": [
+      "教学楼",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "元培路与宣怀大道交叉口南100米",
+      "amapType": "科教文化服务;学校;学校",
+      "amapId": "B0FFI6IMZA",
+      "aliases": [
+        "上海交通大学闵行校区蔡翠菊教学楼"
+      ],
+      "notes": "高德采集，距校区中心 145 米"
+    }
+  },
+  {
+    "id": "parking_sjtu_minhang_上海交通大学闵行校区内部地下停车场出入口",
+    "category": "parking",
+    "subCategory": "停车场",
+    "name": "上海交通大学闵行校区内部地下停车场(出入口)",
+    "locationName": "上海交通大学闵行校区内部地下停车场(出入口)",
+    "lng": 121.440135,
+    "lat": 31.026668,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学闵行校区内部地下停车场(出入口) 停车场 parking 交大闵行 上海交通大学",
+    "tags": [
+      "停车场",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "上海交通大学闵行校区内部地下停车场",
+      "amapType": "交通设施服务;停车场;停车场出入口",
+      "amapId": "B0FFG8UZ0P",
+      "aliases": [
+        "上海交通大学闵行校区内部地下停车场(出入口)"
+      ],
+      "notes": "高德采集，距校区中心 331 米"
+    }
+  },
+  {
+    "id": "college_sjtu_minhang_上海交通大学闵行校区中国质量发展研究院",
+    "category": "college",
+    "subCategory": "教学楼",
+    "name": "上海交通大学(闵行校区)中国质量发展研究院",
+    "locationName": "上海交通大学(闵行校区)中国质量发展研究院",
+    "lng": 121.438075,
+    "lat": 31.026375,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学(闵行校区)中国质量发展研究院 教学楼 college 交大闵行 上海交通大学",
+    "tags": [
+      "教学楼",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "叔同路与宣怀大道交叉口西北100米",
+      "amapType": "科教文化服务;科研机构;科研机构",
+      "amapId": "B0L3CXJPP2",
+      "aliases": [
+        "上海交通大学(闵行校区)中国质量发展研究院"
+      ],
+      "notes": "高德采集，距校区中心 141 米"
+    }
+  },
+  {
+    "id": "college_sjtu_minhang_上海交通大学闵行校区电子信息与电气工程学院楼群1",
+    "category": "college",
+    "subCategory": "教学楼",
+    "name": "上海交通大学(闵行校区)电子信息与电气工程学院楼群1号楼",
+    "locationName": "上海交通大学(闵行校区)电子信息与电气工程学院楼群1号楼",
+    "lng": 121.440775,
+    "lat": 31.025825,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学(闵行校区)电子信息与电气工程学院楼群1号楼 教学楼 college 交大闵行 上海交通大学",
+    "tags": [
+      "教学楼",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "宣怀大道与龙坡路交叉口东100米",
+      "amapType": "科教文化服务;学校;学校",
+      "amapId": "B0LG31HFBW",
+      "aliases": [
+        "上海交通大学(闵行校区)电子信息与电气工程学院楼群1号楼"
+      ],
+      "notes": "高德采集，距校区中心 372 米"
+    }
+  },
+  {
+    "id": "scene_sjtu_minhang_木槿校园影城交大店",
+    "category": "scene",
+    "subCategory": "开敞空间",
+    "name": "上海交通大学交大闵行 木槿校园影城(交大店)",
+    "locationName": "木槿校园影城(交大店)",
+    "lng": 121.434379,
+    "lat": 31.023355,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学交大闵行 木槿校园影城(交大店) 木槿校园影城(交大店) 开敞空间 scene 交大闵行 上海交通大学",
+    "tags": [
+      "开敞空间",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800号上海交通大学闵行校区菁菁堂一楼",
+      "amapType": "体育休闲服务;影剧院;电影院",
+      "amapId": "B0FFGKU8Q2",
+      "aliases": [
+        "木槿校园影城(交大店)"
+      ],
+      "notes": "高德采集，距校区中心 346 米"
+    },
+    "scenes": [
+      "walk",
+      "photo"
+    ],
+    "sceneWeight": 1.0
+  },
+  {
+    "id": "scene_sjtu_minhang_特来电汽车充电站上海交大图书馆充电站",
+    "category": "scene",
+    "subCategory": "图书馆",
+    "name": "上海交通大学交大闵行 特来电汽车充电站(上海交大图书馆充电站)",
+    "locationName": "特来电汽车充电站(上海交大图书馆充电站)",
+    "lng": 121.43654,
+    "lat": 31.026507,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学交大闵行 特来电汽车充电站(上海交大图书馆充电站) 特来电汽车充电站(上海交大图书馆充电站) 图书馆 scene 交大闵行 上海交通大学",
+    "tags": [
+      "图书馆",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "上海市闵行区思源北路上海市闵行区江川路街道上海交通大学闵行校区",
+      "amapType": "汽车服务;充电站;充电站",
+      "amapId": "B0HG3CEBR1",
+      "aliases": [
+        "特来电汽车充电站(上海交大图书馆充电站)"
+      ],
+      "notes": "高德采集，距校区中心 103 米"
+    },
+    "scenes": [
+      "date",
+      "photo",
+      "walk"
+    ],
+    "sceneWeight": 1.0
+  },
+  {
+    "id": "college_sjtu_minhang_国家能源智能电网上海研发中心",
+    "category": "college",
+    "subCategory": "教学楼",
+    "name": "上海交通大学交大闵行 国家能源智能电网(上海)研发中心",
+    "locationName": "国家能源智能电网(上海)研发中心",
+    "lng": 121.439806,
+    "lat": 31.022615,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学交大闵行 国家能源智能电网(上海)研发中心 国家能源智能电网(上海)研发中心 教学楼 college 交大闵行 上海交通大学",
+    "tags": [
+      "教学楼",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800上海交通大学闵行校区",
+      "amapType": "公司企业;公司企业;公司企业",
+      "amapId": "B0FFFPM2N5",
+      "aliases": [
+        "国家能源智能电网(上海)研发中心"
+      ],
+      "notes": "高德采集，距校区中心 434 米"
+    }
+  },
+  {
+    "id": "parking_sjtu_minhang_普天新能源汽车充电站思源北路",
+    "category": "parking",
+    "subCategory": "停车场",
+    "name": "上海交通大学交大闵行 普天新能源汽车充电站(思源北路)",
+    "locationName": "普天新能源汽车充电站(思源北路)",
+    "lng": 121.440022,
+    "lat": 31.027258,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学交大闵行 普天新能源汽车充电站(思源北路) 普天新能源汽车充电站(思源北路) 停车场 parking 交大闵行 上海交通大学",
+    "tags": [
+      "停车场",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800号交通大学闵行校区",
+      "amapType": "汽车服务;充电站;充电站",
+      "amapId": "B0FFFPLZJ0",
+      "aliases": [
+        "普天新能源汽车充电站(思源北路)"
+      ],
+      "notes": "高德采集，距校区中心 350 米"
+    }
+  },
+  {
+    "id": "scene_sjtu_minhang_涵泽湖",
+    "category": "scene",
+    "subCategory": "园林景观",
+    "name": "上海交通大学交大闵行 涵泽湖",
+    "locationName": "涵泽湖",
+    "lng": 121.434388,
+    "lat": 31.025931,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学交大闵行 涵泽湖 涵泽湖 园林景观 scene 交大闵行 上海交通大学 涵泽湖",
+    "tags": [
+      "园林景观",
+      "交大闵行",
+      "上海交通大学",
+      "涵泽湖"
+    ],
+    "meta": {
+      "address": "东川路800上海交通大学闵行校区",
+      "amapType": "风景名胜;风景名胜;风景名胜",
+      "amapId": "B0FFF0FWMS",
+      "aliases": [
+        "涵泽湖"
+      ],
+      "notes": "高德采集，距校区中心 240 米；公开资料佐证（置信度 0.95）",
+      "publicEvidence": {
+        "confidence": 0.95,
+        "quotes": [
+          "涵泽湖位于图书馆新馆西边,其东北角为逸夫科技楼",
+          "思源湖、涵泽湖、捭阖塘等湖泊散布",
+          "在涵泽湖附近"
+        ],
+        "sourceUrls": [
+          "https://weixin.sogou.com/link?url=dn9a_-gY295K0Rci_xozVXfdMkSQTLW6ft3wfAVofsP5Peu-UiA4DG9wq5N0YGaZHIXpffOFIlCVgrFeYQugDk_TBhULCMoFs7rbNk1Hs1fepmG1jDKGeuBDe55tBD6oJQe6Hn1S24TTbxOEUV_A4IIEBDZx2Zdw6gZCFTxM-oxsJYoYDvR2xxU0r7akbcT5GDAqCYCMfmmZpJFCgA4vRTBbgXR0Lu-FRqfaJlOWWmX3lEr6bu4vJdbDe7RAP3Ge1mcqWdODcbo-Ygl78dJNzka-Ubxsx6H3_VyytcHDpZVQsoefGpxWvumax5MLp2VWiZqwg0yoRFw.&type=2&query=%E4%BA%A4%E5%A4%A7%E9%97%B5%E8%A1%8C%20%E6%80%9D%E6%BA%90%E6%B9%96%20%E6%B6%B5%E6%B3%BD%E6%B9%96&token=69CB1C4BB085B4B08186DCA4EC70D8B081A8183E6AB3B1F1",
+          "https://weixin.sogou.com/link?url=dn9a_-gY295K0Rci_xozVXfdMkSQTLW6cwJThYulHEtVjXrGTiVgSwYJ_SHIvEVoJaEUwT6nMdBHRZg5uTp1VlqXa8Fplpd9nlxug30VRcQlTiPTo4AvslIYR16cFgYdSajfMcAtjHOC3z1PaaZDg-WeNZLY3Z89Y5392O16FBJt4hV6TesXl3Z1Zg2HCHVnIrpNR9eoR4X7KA7QtHFiHjpi4FRwf0vd7CRmrlAhcBal5Mst-MJoLmDvsBp1KEIGEJw2shrzijZS6t2rFt2rnA..&type=2&query=%E4%BA%A4%E5%A4%A7%E9%97%B5%E8%A1%8C%20%E6%80%9D%E6%BA%90%E6%B9%96%20%E6%B6%B5%E6%B3%BD%E6%B9%96&token=69CB1C4BB085B4B08186DCA4EC70D8B081A8183E6AB3B1F1",
+          "https://weixin.sogou.com/link?url=dn9a_-gY295K0Rci_xozVXfdMkSQTLW6cwJThYulHEtVjXrGTiVgSwYJ_SHIvEVoJaEUwT6nMdBHRZg5uTp1VlqXa8Fplpd9B9RSIQOrPr1lg3oQOEWmw3QCe0pS4omVygTrOb10ca5WdWhgT1waBHLCZpgWR6Lobwq-AqSS4gh3fwIzGYIJ_LnFJaWTNUFoRXxqUInsVV9RXKG_Sfn90TdFogPx_0i8zhTAH1qxIbPhvhuWvdteSn2J6KuOed_2l66Q-GxpyV8HpHkoPMgL3A..&type=2&query=%E4%BA%A4%E5%A4%A7%E9%97%B5%E8%A1%8C%20%E6%80%9D%E6%BA%90%E6%B9%96%20%E6%B6%B5%E6%B3%BD%E6%B9%96&token=69CB1C4BB085B4B08186DCA4EC70D8B081A8183E6AB3B1F1"
+        ]
+      }
+    },
+    "scenes": [
+      "date",
+      "photo",
+      "walk"
+    ],
+    "sceneWeight": 1.0
+  },
+  {
+    "id": "scene_sjtu_minhang_上海交通大学交慧桥",
+    "category": "scene",
+    "subCategory": "水景",
+    "name": "上海交通大学交慧桥",
+    "locationName": "上海交通大学交慧桥",
+    "lng": 121.435415,
+    "lat": 31.028918,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学交慧桥 水景 scene 交大闵行 上海交通大学",
+    "tags": [
+      "水景",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "闵行区",
+      "amapType": "地名地址信息;交通地名;桥",
+      "amapId": "B0JRUSZ275",
+      "aliases": [
+        "上海交通大学交慧桥"
+      ],
+      "notes": "高德采集，距校区中心 390 米"
+    },
+    "scenes": [
+      "date",
+      "walk",
+      "photo"
+    ],
+    "sceneWeight": 1.0
+  },
+  {
+    "id": "college_sjtu_minhang_上海交通大学设计学院",
+    "category": "college",
+    "subCategory": "教学楼",
+    "name": "上海交通大学设计学院",
+    "locationName": "上海交通大学设计学院",
+    "lng": 121.439283,
+    "lat": 31.022909,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学设计学院 教学楼 college 交大闵行 上海交通大学",
+    "tags": [
+      "教学楼",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路698号",
+      "amapType": "科教文化服务;学校;高等院校",
+      "amapId": "B0JD5SBR1U",
+      "aliases": [
+        "上海交通大学设计学院"
+      ],
+      "notes": "高德采集，距校区中心 378 米"
+    }
+  },
+  {
+    "id": "college_sjtu_minhang_上海交通大学农生学院",
+    "category": "college",
+    "subCategory": "教学楼",
+    "name": "上海交通大学农生学院",
+    "locationName": "上海交通大学农生学院",
+    "lng": 121.438325,
+    "lat": 31.024675,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学农生学院 教学楼 college 交大闵行 上海交通大学",
+    "tags": [
+      "教学楼",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "元培路与宣怀大道交叉口东南120米",
+      "amapType": "科教文化服务;学校;高等院校",
+      "amapId": "B0MRULN4FX",
+      "aliases": [
+        "上海交通大学农生学院"
+      ],
+      "notes": "高德采集，距校区中心 173 米"
+    }
+  },
+  {
+    "id": "scene_sjtu_minhang_上海交通大学闵行校区包玉刚图书馆",
+    "category": "scene",
+    "subCategory": "图书馆",
+    "name": "上海交通大学闵行校区包玉刚图书馆",
+    "locationName": "上海交通大学闵行校区包玉刚图书馆",
+    "lng": 121.429836,
+    "lat": 31.02195,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学闵行校区包玉刚图书馆 图书馆 scene 交大闵行 上海交通大学 包玉刚图书馆",
+    "tags": [
+      "图书馆",
+      "交大闵行",
+      "上海交通大学",
+      "包玉刚图书馆"
+    ],
+    "meta": {
+      "address": "在上海交通大学闵行校区包玉刚图书馆附近",
+      "amapType": "科教文化服务;图书馆;图书馆",
+      "amapId": "B001556N1P",
+      "aliases": [
+        "上海交通大学闵行校区包玉刚图书馆"
+      ],
+      "notes": "高德采集，距校区中心 785 米；公开资料佐证（置信度 0.90）",
+      "publicEvidence": {
+        "confidence": 0.9,
+        "quotes": [
+          "程及美术馆→包玉刚图书馆→玉兰苑"
+        ],
+        "sourceUrls": [
+          "https://mp.weixin.qq.com/s?__biz=MzIwOTIxODk1Nw==&mid=2651382591&idx=3&sn=488f892aee15f725ef0c21ade0c5e196"
+        ]
+      }
+    },
+    "scenes": [
+      "date",
+      "photo",
+      "walk"
+    ],
+    "sceneWeight": 1.0
+  },
+  {
+    "id": "scene_sjtu_minhang_上海交通大学闵行校区李政道图书馆",
+    "category": "scene",
+    "subCategory": "图书馆",
+    "name": "上海交通大学闵行校区李政道图书馆",
+    "locationName": "上海交通大学闵行校区李政道图书馆",
+    "lng": 121.42638,
+    "lat": 31.025287,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学闵行校区李政道图书馆 图书馆 scene 交大闵行 上海交通大学",
+    "tags": [
+      "图书馆",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800上海交通大学闵行校区",
+      "amapType": "科教文化服务;图书馆;图书馆",
+      "amapId": "B0FFFPM361",
+      "aliases": [
+        "上海交通大学闵行校区李政道图书馆"
+      ],
+      "notes": "高德采集，距校区中心 1002 米"
+    },
+    "scenes": [
+      "date",
+      "photo",
+      "walk"
+    ],
+    "sceneWeight": 1.0
+  },
+  {
+    "id": "scene_sjtu_minhang_上海交通大学闵行校区致远游泳馆",
+    "category": "scene",
+    "subCategory": "运动场地",
+    "name": "上海交通大学闵行校区致远游泳馆",
+    "locationName": "上海交通大学闵行校区致远游泳馆",
+    "lng": 121.426781,
+    "lat": 31.020315,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学闵行校区致远游泳馆 运动场地 scene 交大闵行 上海交通大学 游泳馆",
+    "tags": [
+      "运动场地",
+      "交大闵行",
+      "上海交通大学",
+      "游泳馆"
+    ],
+    "meta": {
+      "address": "沧源路1001号",
+      "amapType": "体育休闲服务;运动场馆;游泳馆",
+      "amapId": "B0FFFPM362",
+      "aliases": [
+        "上海交通大学闵行校区致远游泳馆"
+      ],
+      "notes": "高德采集，距校区中心 1128 米；公开资料佐证（置信度 0.85）",
+      "publicEvidence": {
+        "confidence": 0.85,
+        "quotes": [
+          "游泳馆"
+        ],
+        "sourceUrls": [
+          "https://nsse.sjtu.edu.cn/Web/Content/90"
+        ]
+      }
+    },
+    "scenes": [
+      "walk"
+    ],
+    "sceneWeight": 1.0
+  },
+  {
+    "id": "scene_sjtu_minhang_上海交通大学闵行校区霍英东体育中心",
+    "category": "scene",
+    "subCategory": "运动场地",
+    "name": "上海交通大学闵行校区霍英东体育中心",
+    "locationName": "上海交通大学闵行校区霍英东体育中心",
+    "lng": 121.424673,
+    "lat": 31.026621,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学闵行校区霍英东体育中心 运动场地 scene 交大闵行 上海交通大学",
+    "tags": [
+      "运动场地",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800号上海交通大学闵行校区",
+      "amapType": "体育休闲服务;运动场馆;综合体育馆",
+      "amapId": "B0FFH9YPPG",
+      "aliases": [
+        "上海交通大学闵行校区霍英东体育中心"
+      ],
+      "notes": "高德采集，距校区中心 1170 米"
+    },
+    "scenes": [
+      "walk"
+    ],
+    "sceneWeight": 1.0
+  },
+  {
+    "id": "college_sjtu_minhang_上海交通大学闵行校区人文学院",
+    "category": "college",
+    "subCategory": "教学楼",
+    "name": "上海交通大学闵行校区人文学院",
+    "locationName": "上海交通大学闵行校区人文学院",
+    "lng": 121.439494,
+    "lat": 31.021925,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学闵行校区人文学院 教学楼 college 交大闵行 上海交通大学",
+    "tags": [
+      "教学楼",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800上海交通大学闵行校区",
+      "amapType": "科教文化服务;学校;高等院校",
+      "amapId": "B001570L1I",
+      "aliases": [
+        "上海交通大学闵行校区人文学院"
+      ],
+      "notes": "高德采集，距校区中心 479 米"
+    }
+  },
+  {
+    "id": "college_sjtu_minhang_上海交通大学外国语学院",
+    "category": "college",
+    "subCategory": "教学楼",
+    "name": "上海交通大学外国语学院",
+    "locationName": "上海交通大学外国语学院",
+    "lng": 121.43934,
+    "lat": 31.021379,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学外国语学院 教学楼 college 交大闵行 上海交通大学",
+    "tags": [
+      "教学楼",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800号交通大学闵行校区",
+      "amapType": "科教文化服务;学校;高等院校",
+      "amapId": "B0FFG8UZKE",
+      "aliases": [
+        "上海交通大学外国语学院"
+      ],
+      "notes": "高德采集，距校区中心 525 米"
+    }
+  },
+  {
+    "id": "college_sjtu_minhang_上海交通大学闵行校区国家电投智慧能源创新学院",
+    "category": "college",
+    "subCategory": "教学楼",
+    "name": "上海交通大学闵行校区国家电投智慧能源创新学院",
+    "locationName": "上海交通大学闵行校区国家电投智慧能源创新学院",
+    "lng": 121.435398,
+    "lat": 31.030267,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学闵行校区国家电投智慧能源创新学院 教学楼 college 交大闵行 上海交通大学",
+    "tags": [
+      "教学楼",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "剑川路665号",
+      "amapType": "科教文化服务;学校;职业技术学校",
+      "amapId": "B0H69CMICW",
+      "aliases": [
+        "上海交通大学闵行校区国家电投智慧能源创新学院"
+      ],
+      "notes": "高德采集，距校区中心 532 米"
+    }
+  },
+  {
+    "id": "college_sjtu_minhang_上海交通大学闵行校区药学院",
+    "category": "college",
+    "subCategory": "教学楼",
+    "name": "上海交通大学闵行校区药学院",
+    "locationName": "上海交通大学闵行校区药学院",
+    "lng": 121.442661,
+    "lat": 31.02973,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学闵行校区药学院 教学楼 college 交大闵行 上海交通大学",
+    "tags": [
+      "教学楼",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800上海交通大学闵行校区",
+      "amapType": "科教文化服务;学校;高等院校",
+      "amapId": "B001570LGN",
+      "aliases": [
+        "上海交通大学闵行校区药学院"
+      ],
+      "notes": "高德采集，距校区中心 714 米"
+    }
+  },
+  {
+    "id": "college_sjtu_minhang_上海交通大学闵行校区航空航天学院",
+    "category": "college",
+    "subCategory": "教学楼",
+    "name": "上海交通大学闵行校区航空航天学院",
+    "locationName": "上海交通大学闵行校区航空航天学院",
+    "lng": 121.445973,
+    "lat": 31.023686,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学闵行校区航空航天学院 教学楼 college 交大闵行 上海交通大学",
+    "tags": [
+      "教学楼",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800上海交通大学闵行校区",
+      "amapType": "科教文化服务;学校;高等院校",
+      "amapId": "B0FFFPM25S",
+      "aliases": [
+        "上海交通大学闵行校区航空航天学院"
+      ],
+      "notes": "高德采集，距校区中心 893 米"
+    }
+  },
+  {
+    "id": "college_sjtu_minhang_上海交通大学闵行校区物理与天文学院",
+    "category": "college",
+    "subCategory": "教学楼",
+    "name": "上海交通大学闵行校区物理与天文学院",
+    "locationName": "上海交通大学闵行校区物理与天文学院",
+    "lng": 121.425542,
+    "lat": 31.025173,
+    "campus": "交大闵行",
+    "source": "amap_place_text",
+    "text": "上海交通大学闵行校区物理与天文学院 教学楼 college 交大闵行 上海交通大学",
+    "tags": [
+      "教学楼",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800号上海交通大学(闵行本部校区)",
+      "amapType": "科教文化服务;学校;高等院校",
+      "amapId": "B0HD37QHI5",
+      "aliases": [
+        "上海交通大学闵行校区物理与天文学院"
+      ],
+      "notes": "高德采集，距校区中心 1083 米"
+    }
+  },
+  {
+    "id": "canteen_sjtu_minhang_赛文西餐厅",
+    "category": "canteen",
+    "subCategory": "食堂",
+    "name": "上海交通大学交大闵行 赛文西餐厅",
+    "locationName": "赛文西餐厅",
+    "lng": 121.441125,
+    "lat": 31.029775,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学交大闵行 赛文西餐厅 赛文西餐厅 食堂 canteen 交大闵行 上海交通大学 上海交通大学闵行校区第七餐饮大楼",
+    "tags": [
+      "食堂",
+      "交大闵行",
+      "上海交通大学",
+      "上海交通大学闵行校区第七餐饮大楼"
+    ],
+    "meta": {
+      "address": "振义路与文治大道交叉口西120米",
+      "amapType": "餐饮服务;外国餐厅;外国餐厅",
+      "amapId": "B0JKDP4YVN",
+      "aliases": [
+        "赛文西餐厅"
+      ],
+      "notes": "高德采集，距校区中心 612 米"
+    }
+  },
+  {
+    "id": "canteen_sjtu_minhang_上海交通大学闵行校区风味餐厅",
+    "category": "canteen",
+    "subCategory": "食堂",
+    "name": "上海交通大学闵行校区风味餐厅",
+    "locationName": "上海交通大学闵行校区风味餐厅",
+    "lng": 121.427549,
+    "lat": 31.025266,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学闵行校区风味餐厅 食堂 canteen 交大闵行 上海交通大学",
+    "tags": [
+      "食堂",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "上海交通大学闵行校区第四餐饮大楼",
+      "amapType": "餐饮服务;中餐厅;中餐厅",
+      "amapId": "B0FFHHZJKL",
+      "aliases": [
+        "上海交通大学闵行校区风味餐厅"
+      ],
+      "notes": "高德采集，距校区中心 891 米"
+    }
+  },
+  {
+    "id": "canteen_sjtu_minhang_上海交通大学闵行校区第四餐饮大楼",
+    "category": "canteen",
+    "subCategory": "食堂",
+    "name": "上海交通大学闵行校区第四餐饮大楼",
+    "locationName": "上海交通大学闵行校区第四餐饮大楼",
+    "lng": 121.427234,
+    "lat": 31.025246,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学闵行校区第四餐饮大楼 食堂 canteen 交大闵行 上海交通大学 吉姆丽德(闵行交大店)",
+    "tags": [
+      "食堂",
+      "交大闵行",
+      "上海交通大学",
+      "吉姆丽德(闵行交大店)"
+    ],
+    "meta": {
+      "address": "东川路800号上海交通大学内",
+      "amapType": "餐饮服务;中餐厅;中餐厅",
+      "amapId": "B001556TE3",
+      "aliases": [
+        "上海交通大学闵行校区第四餐饮大楼"
+      ],
+      "notes": "高德采集，距校区中心 921 米"
+    }
+  },
+  {
+    "id": "canteen_sjtu_minhang_上海交通大学闵行校区第二餐饮大楼",
+    "category": "canteen",
+    "subCategory": "食堂",
+    "name": "上海交通大学闵行校区第二餐饮大楼",
+    "locationName": "上海交通大学闵行校区第二餐饮大楼",
+    "lng": 121.436433,
+    "lat": 31.022743,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学闵行校区第二餐饮大楼 食堂 canteen 交大闵行 上海交通大学 上海交通大学闵行校区第二餐饮大楼西餐厅 陈香贵牛肉面 吉祥馄饨(上海交通大学店)",
+    "tags": [
+      "食堂",
+      "交大闵行",
+      "上海交通大学",
+      "上海交通大学闵行校区第二餐饮大楼西餐厅",
+      "陈香贵牛肉面",
+      "吉祥馄饨(上海交通大学店)"
+    ],
+    "meta": {
+      "address": "东川路800号上海交通大学内(近永平路)",
+      "amapType": "餐饮服务;中餐厅;中餐厅",
+      "amapId": "B001556TDB",
+      "aliases": [
+        "上海交通大学闵行校区第二餐饮大楼"
+      ],
+      "notes": "高德采集，距校区中心 322 米"
+    }
+  },
+  {
+    "id": "canteen_sjtu_minhang_上海交通大学闵行校区第三餐饮大楼",
+    "category": "canteen",
+    "subCategory": "食堂",
+    "name": "上海交通大学闵行校区第三餐饮大楼",
+    "locationName": "上海交通大学闵行校区第三餐饮大楼",
+    "lng": 121.43296,
+    "lat": 31.026777,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学闵行校区第三餐饮大楼 食堂 canteen 交大闵行 上海交通大学",
+    "tags": [
+      "食堂",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800号交通大学第三餐饮大楼1楼",
+      "amapType": "餐饮服务;中餐厅;中餐厅",
+      "amapId": "B001556TDV",
+      "aliases": [
+        "上海交通大学闵行校区第三餐饮大楼"
+      ],
+      "notes": "高德采集，距校区中心 395 米"
+    }
+  },
+  {
+    "id": "canteen_sjtu_minhang_上海交通大学闵行校区第五餐饮大楼",
+    "category": "canteen",
+    "subCategory": "食堂",
+    "name": "上海交通大学闵行校区第五餐饮大楼",
+    "locationName": "上海交通大学闵行校区第五餐饮大楼",
+    "lng": 121.441194,
+    "lat": 31.023627,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学闵行校区第五餐饮大楼 食堂 canteen 交大闵行 上海交通大学",
+    "tags": [
+      "食堂",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800号上海交通大学电院楼群(近永平路)",
+      "amapType": "餐饮服务;中餐厅;中餐厅",
+      "amapId": "B0FFFPM2ZL",
+      "aliases": [
+        "上海交通大学闵行校区第五餐饮大楼"
+      ],
+      "notes": "高德采集，距校区中心 467 米"
+    }
+  },
+  {
+    "id": "canteen_sjtu_minhang_上海交通大学闵行校区清真餐厅",
+    "category": "canteen",
+    "subCategory": "食堂",
+    "name": "上海交通大学(闵行校区)清真餐厅",
+    "locationName": "上海交通大学(闵行校区)清真餐厅",
+    "lng": 121.431578,
+    "lat": 31.022885,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学(闵行校区)清真餐厅 食堂 canteen 交大闵行 上海交通大学",
+    "tags": [
+      "食堂",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800号上海交通大学(闵行本部校区)",
+      "amapType": "餐饮服务;中餐厅;清真菜馆",
+      "amapId": "B0FFG8V045",
+      "aliases": [
+        "上海交通大学(闵行校区)清真餐厅"
+      ],
+      "notes": "高德采集，距校区中心 590 米"
+    }
+  },
+  {
+    "id": "canteen_sjtu_minhang_上海交通大学闵行本部校区哈乐餐厅",
+    "category": "canteen",
+    "subCategory": "食堂",
+    "name": "上海交通大学闵行本部校区哈乐餐厅",
+    "locationName": "上海交通大学闵行本部校区哈乐餐厅",
+    "lng": 121.432407,
+    "lat": 31.020713,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学闵行本部校区哈乐餐厅 食堂 canteen 交大闵行 上海交通大学",
+    "tags": [
+      "食堂",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800号上海交通大学南区宿舍群内(近永平路)",
+      "amapType": "餐饮服务;餐饮相关场所;餐饮相关",
+      "amapId": "B0LB152MDN",
+      "aliases": [
+        "上海交通大学闵行本部校区哈乐餐厅"
+      ],
+      "notes": "高德采集，距校区中心 691 米"
+    }
+  },
+  {
+    "id": "canteen_sjtu_minhang_上海交通大学闵行校区第六餐饮大楼",
+    "category": "canteen",
+    "subCategory": "食堂",
+    "name": "上海交通大学闵行校区第六餐饮大楼",
+    "locationName": "上海交通大学闵行校区第六餐饮大楼",
+    "lng": 121.444651,
+    "lat": 31.029278,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学闵行校区第六餐饮大楼 食堂 canteen 交大闵行 上海交通大学",
+    "tags": [
+      "食堂",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800上海交通大学闵行校区",
+      "amapType": "餐饮服务;中餐厅;中餐厅",
+      "amapId": "B0G0KOW69J",
+      "aliases": [
+        "上海交通大学闵行校区第六餐饮大楼"
+      ],
+      "notes": "高德采集，距校区中心 844 米"
+    }
+  },
+  {
+    "id": "canteen_sjtu_minhang_RuralTequila墨西哥餐厅",
+    "category": "canteen",
+    "subCategory": "食堂",
+    "name": "上海交通大学交大闵行 Rural Tequila墨西哥餐厅",
+    "locationName": "Rural Tequila墨西哥餐厅",
+    "lng": 121.434837,
+    "lat": 31.017801,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学交大闵行 Rural Tequila墨西哥餐厅 Rural Tequila墨西哥餐厅 食堂 canteen 交大闵行 上海交通大学 清阿婆泡面小屋",
+    "tags": [
+      "食堂",
+      "交大闵行",
+      "上海交通大学",
+      "清阿婆泡面小屋"
+    ],
+    "meta": {
+      "address": "东川路金榜世家-六期",
+      "amapType": "餐饮服务;餐饮相关场所;餐饮相关",
+      "amapId": "B0FFIBVBZG",
+      "aliases": [
+        "Rural Tequila墨西哥餐厅"
+      ],
+      "notes": "高德采集，距校区中心 887 米"
+    }
+  },
+  {
+    "id": "canteen_sjtu_minhang_上海交通大学国家电投智慧能源创新学院东部餐厅",
+    "category": "canteen",
+    "subCategory": "食堂",
+    "name": "上海交通大学国家电投智慧能源创新学院东部餐厅",
+    "locationName": "上海交通大学国家电投智慧能源创新学院东部餐厅",
+    "lng": 121.435267,
+    "lat": 31.02997,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学国家电投智慧能源创新学院东部餐厅 食堂 canteen 交大闵行 上海交通大学",
+    "tags": [
+      "食堂",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800号上海交通大学(闵行本部校区)",
+      "amapType": "餐饮服务;中餐厅;中餐厅",
+      "amapId": "B0J6P51S7R",
+      "aliases": [
+        "上海交通大学国家电投智慧能源创新学院东部餐厅"
+      ],
+      "notes": "高德采集，距校区中心 504 米"
+    }
+  },
+  {
+    "id": "canteen_sjtu_minhang_上海交通大学国家电投智慧能源创新学院西部餐厅",
+    "category": "canteen",
+    "subCategory": "食堂",
+    "name": "上海交通大学国家电投智慧能源创新学院西部餐厅",
+    "locationName": "上海交通大学国家电投智慧能源创新学院西部餐厅",
+    "lng": 121.434094,
+    "lat": 31.02966,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学国家电投智慧能源创新学院西部餐厅 食堂 canteen 交大闵行 上海交通大学",
+    "tags": [
+      "食堂",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800号",
+      "amapType": "餐饮服务;中餐厅;中餐厅",
+      "amapId": "B0MA1ADMOL",
+      "aliases": [
+        "上海交通大学国家电投智慧能源创新学院西部餐厅"
+      ],
+      "notes": "高德采集，距校区中心 519 米"
+    }
+  },
+  {
+    "id": "canteen_sjtu_minhang_牛正焱",
+    "category": "canteen",
+    "subCategory": "食堂",
+    "name": "上海交通大学交大闵行 牛正焱",
+    "locationName": "牛正焱",
+    "lng": 121.434525,
+    "lat": 31.017975,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学交大闵行 牛正焱 牛正焱 食堂 canteen 交大闵行 上海交通大学 纳西寨子麻椒瓦香鸡 老广味正宗葱油手撕鸡 外焦里嫩·顺德干蒸鸡 蘑咕美食空间 The Family Pizza意大利纯手工窑炉披萨",
+    "tags": [
+      "食堂",
+      "交大闵行",
+      "上海交通大学",
+      "纳西寨子麻椒瓦香鸡",
+      "老广味正宗葱油手撕鸡",
+      "外焦里嫩·顺德干蒸鸡",
+      "蘑咕美食空间",
+      "The Family Pizza意大利纯手工窑炉披萨"
+    ],
+    "meta": {
+      "address": "精勤路与南洋南路交叉口东南200米",
+      "amapType": "餐饮服务;中餐厅;火锅店",
+      "amapId": "B0MU2UD2NE",
+      "aliases": [
+        "牛正焱"
+      ],
+      "notes": "高德采集，距校区中心 875 米"
+    }
+  },
+  {
+    "id": "canteen_sjtu_minhang_玉兰苑",
+    "category": "canteen",
+    "subCategory": "食堂",
+    "name": "上海交通大学交大闵行 玉兰苑",
+    "locationName": "玉兰苑",
+    "lng": 121.431343,
+    "lat": 31.023487,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学交大闵行 玉兰苑 玉兰苑 食堂 canteen 交大闵行 上海交通大学 餐堡(玉兰苑店) 玉兰苑",
+    "tags": [
+      "食堂",
+      "交大闵行",
+      "上海交通大学",
+      "餐堡(玉兰苑店)",
+      "玉兰苑"
+    ],
+    "meta": {
+      "address": "东川路800号上海交通大学(闵行本部校区)",
+      "amapType": "餐饮服务;中餐厅;中餐厅",
+      "amapId": "B0FFJ1DK4P",
+      "aliases": [
+        "玉兰苑"
+      ],
+      "notes": "高德采集，距校区中心 579 米；公开资料佐证（置信度 0.85）",
+      "publicEvidence": {
+        "confidence": 0.85,
+        "quotes": [
+          "包玉刚图书馆→玉兰苑→植物园"
+        ],
+        "sourceUrls": [
+          "https://mp.weixin.qq.com/s?__biz=MzIwOTIxODk1Nw==&mid=2651382591&idx=3&sn=488f892aee15f725ef0c21ade0c5e196"
+        ]
+      }
+    }
+  },
+  {
+    "id": "canteen_sjtu_minhang_卤菜摊",
+    "category": "canteen",
+    "subCategory": "食堂",
+    "name": "上海交通大学交大闵行 卤菜摊",
+    "locationName": "卤菜摊",
+    "lng": 121.443075,
+    "lat": 31.030375,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学交大闵行 卤菜摊 卤菜摊 食堂 canteen 交大闵行 上海交通大学",
+    "tags": [
+      "食堂",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "文治大道与振义路交叉口东北100米",
+      "amapType": "餐饮服务;中餐厅;中餐厅",
+      "amapId": "B0M6XHP0Z4",
+      "aliases": [
+        "卤菜摊"
+      ],
+      "notes": "高德采集，距校区中心 790 米"
+    }
+  },
+  {
+    "id": "coffee_sjtu_minhang_E咖啡厅",
+    "category": "coffee",
+    "subCategory": "咖啡",
+    "name": "上海交通大学交大闵行 E+咖啡厅",
+    "locationName": "E+咖啡厅",
+    "lng": 121.441188,
+    "lat": 31.025114,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学交大闵行 E+咖啡厅 E+咖啡厅 咖啡 coffee 交大闵行 上海交通大学",
+    "tags": [
+      "咖啡",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "上海交通大学电信学院2.3号楼之间",
+      "amapType": "餐饮服务;咖啡厅;咖啡厅",
+      "amapId": "B0FFL8W6RD",
+      "aliases": [
+        "E+咖啡厅"
+      ],
+      "notes": "高德采集，距校区中心 415 米"
+    }
+  },
+  {
+    "id": "canteen_sjtu_minhang_串府玉兰苑店",
+    "category": "canteen",
+    "subCategory": "食堂",
+    "name": "上海交通大学交大闵行 串府(玉兰苑店)",
+    "locationName": "串府(玉兰苑店)",
+    "lng": 121.431041,
+    "lat": 31.023521,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学交大闵行 串府(玉兰苑店) 串府(玉兰苑店) 食堂 canteen 交大闵行 上海交通大学",
+    "tags": [
+      "食堂",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "上海交通大学电工力学楼东门东60米",
+      "amapType": "餐饮服务;中餐厅;中餐厅",
+      "amapId": "B0I1N79KGS",
+      "aliases": [
+        "串府(玉兰苑店)"
+      ],
+      "notes": "高德采集，距校区中心 604 米"
+    }
+  },
+  {
+    "id": "canteen_sjtu_minhang_上海交通大学上海快餐",
+    "category": "canteen",
+    "subCategory": "食堂",
+    "name": "上海交通大学上海快餐",
+    "locationName": "上海交通大学上海快餐",
+    "lng": 121.436326,
+    "lat": 31.023175,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学上海快餐 食堂 canteen 交大闵行 上海交通大学",
+    "tags": [
+      "食堂",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800号第二餐饮大楼二楼",
+      "amapType": "餐饮服务;中餐厅;中餐厅",
+      "amapId": "B0FFHHGHMO",
+      "aliases": [
+        "上海交通大学上海快餐"
+      ],
+      "notes": "高德采集，距校区中心 276 米"
+    }
+  },
+  {
+    "id": "canteen_sjtu_minhang_上海交通大学闵行校区大智居",
+    "category": "canteen",
+    "subCategory": "食堂",
+    "name": "上海交通大学闵行校区大智居",
+    "locationName": "上海交通大学闵行校区大智居",
+    "lng": 121.434394,
+    "lat": 31.019496,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学闵行校区大智居 食堂 canteen 交大闵行 上海交通大学",
+    "tags": [
+      "食堂",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800上海交通大学闵行校区",
+      "amapType": "餐饮服务;中餐厅;中餐厅",
+      "amapId": "B00156YALY",
+      "aliases": [
+        "上海交通大学闵行校区大智居"
+      ],
+      "notes": "高德采集，距校区中心 718 米"
+    }
+  },
+  {
+    "id": "coffee_sjtu_minhang_瑞幸咖啡上海交大闵行校区店",
+    "category": "coffee",
+    "subCategory": "咖啡",
+    "name": "上海交通大学交大闵行 瑞幸咖啡(上海交大闵行校区店)",
+    "locationName": "瑞幸咖啡(上海交大闵行校区店)",
+    "lng": 121.433369,
+    "lat": 31.026577,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学交大闵行 瑞幸咖啡(上海交大闵行校区店) 瑞幸咖啡(上海交大闵行校区店) 咖啡 coffee 交大闵行 上海交通大学",
+    "tags": [
+      "咖啡",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "江川路街道东川路800号上海交通大学闵行校区第三餐饮大楼1楼",
+      "amapType": "餐饮服务;咖啡厅;咖啡厅",
+      "amapId": "B0FFM1DBCV",
+      "aliases": [
+        "瑞幸咖啡(上海交大闵行校区店)"
+      ],
+      "notes": "高德采集，距校区中心 351 米"
+    }
+  },
+  {
+    "id": "canteen_sjtu_minhang_吉姆丽德乡村西餐厅闵行交大店",
+    "category": "canteen",
+    "subCategory": "食堂",
+    "name": "上海交通大学交大闵行 吉姆丽德乡村西餐厅(闵行交大店)",
+    "locationName": "吉姆丽德乡村西餐厅(闵行交大店)",
+    "lng": 121.441056,
+    "lat": 31.023412,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学交大闵行 吉姆丽德乡村西餐厅(闵行交大店) 吉姆丽德乡村西餐厅(闵行交大店) 食堂 canteen 交大闵行 上海交通大学",
+    "tags": [
+      "食堂",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "吴泾镇东川路800号上海交通大学第五餐饮大楼3楼",
+      "amapType": "餐饮服务;外国餐厅;西餐厅(综合风味)",
+      "amapId": "B0FFFPM2ZQ",
+      "aliases": [
+        "吉姆丽德乡村西餐厅(闵行交大店)"
+      ],
+      "notes": "高德采集，距校区中心 467 米"
+    }
+  },
+  {
+    "id": "canteen_sjtu_minhang_麦当劳上海麦当劳交大闵行校区餐厅",
+    "category": "canteen",
+    "subCategory": "食堂",
+    "name": "上海交通大学交大闵行 麦当劳(上海麦当劳交大闵行校区餐厅)",
+    "locationName": "麦当劳(上海麦当劳交大闵行校区餐厅)",
+    "lng": 121.431424,
+    "lat": 31.022361,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学交大闵行 麦当劳(上海麦当劳交大闵行校区餐厅) 麦当劳(上海麦当劳交大闵行校区餐厅) 食堂 canteen 交大闵行 上海交通大学",
+    "tags": [
+      "食堂",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800号第一餐饮大楼西区101室",
+      "amapType": "餐饮服务;快餐厅;麦当劳",
+      "amapId": "B0FFLAUYB7",
+      "aliases": [
+        "麦当劳(上海麦当劳交大闵行校区餐厅)"
+      ],
+      "notes": "高德采集，距校区中心 634 米"
+    }
+  },
+  {
+    "id": "coffee_sjtu_minhang_瑞幸咖啡上海交大闵行校区木兰楼店",
+    "category": "coffee",
+    "subCategory": "咖啡",
+    "name": "上海交通大学交大闵行 瑞幸咖啡(上海交大闵行校区木兰楼店)",
+    "locationName": "瑞幸咖啡(上海交大闵行校区木兰楼店)",
+    "lng": 121.445736,
+    "lat": 31.030789,
+    "campus": "交大闵行",
+    "source": "amap_place_around",
+    "text": "上海交通大学交大闵行 瑞幸咖啡(上海交大闵行校区木兰楼店) 瑞幸咖啡(上海交大闵行校区木兰楼店) 咖啡 coffee 交大闵行 上海交通大学",
+    "tags": [
+      "咖啡",
+      "交大闵行",
+      "上海交通大学"
+    ],
+    "meta": {
+      "address": "东川路800号上海交通大学闵行校区木兰船建大楼一层大堂",
+      "amapType": "餐饮服务;咖啡厅;咖啡厅",
+      "amapId": "B0LDOL5QZ4",
+      "aliases": [
+        "瑞幸咖啡(上海交大闵行校区木兰楼店)"
+      ],
+      "notes": "高德采集，距校区中心 1019 米"
+    }
+  }
+]

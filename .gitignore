@@ -20,6 +20,12 @@ __pycache__/
 venv/
 private_data/
 
+# 用户共建数据：含用户问句与上报内容，只存本机、永不入库；仅保留说明文件
+webapp/backend/userdata/*
+!webapp/backend/userdata/README.md
+webapp/backend/.campus_publish.lock
+webapp/backend/.campus_publish_transaction.json
+
 # Jupyter
 .ipynb_checkpoints/
 
@@ -46,3 +52,16 @@ webapp/frontend/build/
 *.njsproj
 *.sln
 *.sw?
+
+# 代码助手 / 本地工具产物（仅本机，不入库）
+.codebuddy/
+.playwright-cli/
+
+# 测试与静态检查缓存
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+.coverage.*
+

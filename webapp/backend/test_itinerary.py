@@ -85,6 +85,16 @@ class ItineraryIntentTests(unittest.TestCase):
         ):
             self.assertFalse(it.is_itinerary_query(query), query)
 
+    def test_indicative_wording_does_not_block_planning(self):
+        # 回归：句子里出现"从我看到的这个位置出发"这类指示性措辞时，行程意图仍要成立。
+        # 旧实现里 server 侧把它当成"机构位置查询"（问句同时含"校区/位置/路线"），
+        # 行程分支再也接管不到，用户只拿到一句"规划路线帮不上忙"。
+        for query in (
+            '请从我看到的这个位置出发，请你为我规划一下普陀校区的参观路线',
+            '从我看到的这个位置出发，安排一天的参观路线',
+        ):
+            self.assertTrue(it.is_itinerary_query(query), query)
+
     def test_blank_and_overlong_queries_are_not_itinerary(self):
         self.assertFalse(it.is_itinerary_query(''))
         self.assertFalse(it.is_itinerary_query(None))

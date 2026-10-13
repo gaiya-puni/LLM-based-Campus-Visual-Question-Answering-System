@@ -2,7 +2,8 @@
 
 Only plant POIs are used in phase two. Existing rule ranking is not imported or
 modified. Analysis zones are metric grid cells, NOT official TAZs; the raster
-mask is a POI coverage hull, NOT a campus boundary or walkability assessment.
+mask is a POI coverage hull with local support, NOT an official boundary or
+walkability assessment.
 """
 from __future__ import annotations
 
@@ -18,7 +19,9 @@ from pathlib import Path
 
 import numpy as np
 
-ALGORITHM_VERSION = "sakde-campus-8-independent"
+from semantic_retrieval import canonical_source_bytes
+
+ALGORITHM_VERSION = "sakde-campus-11-poi-coverage-display"
 SCENE_IDS = ("flower_viewing", "photo", "walk", "date")
 # 每个场景在每个校区展示的推荐点数（Top1..TopN）。该上限同时是 validate_payload 的
 # 结构校验硬边界，防止被篡改的缓存塞入过多点位。
@@ -29,7 +32,8 @@ MAX_PLACES = 5
 PLACE_PRIOR_SCENES = ("walk", "date", "photo")
 DISCLAIMER = (
     "基于植物资料与点位分布的相对适宜度，不是实时花期、人流或噪声测量。"
-    "覆盖范围由数据推定，非正式校界；标记为真实POI参考位置，通行情况需现场确认。"
+    "淡色背景仅表示点位数据覆盖范围，不代表该处具有热点证据，亦非正式校界；"
+    "标记为真实POI参考位置，通行情况需现场确认。"
 )
 
 # ---------------------------------------------------------------------------
@@ -377,6 +381,10 @@ class HeatmapUnavailable(RuntimeError):
     pass
 
 
+class InsufficientSpatialCoverage(ValueError):
+    """A campus/scene has too few audited points to build a meaningful surface."""
+
+
 def load_config(base: Path) -> dict:
     config = json.loads((base / "heatmap_config.json").read_text(encoding="utf-8"))
     for key in ("cellMeters", "zoneMeters", "minInfluenceMeters", "maxInfluenceMeters",
@@ -392,30 +400,62 @@ def load_config(base: Path) -> dict:
     share = config.get("facilityShare", 0)
     if not isinstance(share, (int, float)) or not 0 <= share <= 1:
         raise ValueError("invalid facilityShare")
+    adaptive = config.get("adaptiveBandwidth")
+    if adaptive is not None:
+        if not isinstance(adaptive, dict):
+            raise ValueError("invalid heatmap configuration: adaptiveBandwidth")
+        if adaptive.get("method", "legacy") not in ("legacy", "knn-density"):
+            raise ValueError("unknown adaptiveBandwidth.method")
+        neighbour_k = adaptive.get("neighbourK", 4)
+        if type(neighbour_k) is not int or not 1 <= neighbour_k <= 64:
+            raise ValueError("adaptiveBandwidth.neighbourK must be an integer in [1, 64]")
+        exponent = adaptive.get("densityExponent", 1.0)
+        if (isinstance(exponent, bool) or not isinstance(exponent, (int, float))
+                or not -5 <= exponent <= 5):
+            raise ValueError("adaptiveBandwidth.densityExponent must be a number in [-5, 5]")
     limit = config.get("placeLimit", MAX_PLACES)
     if type(limit) is not int or not 1 <= limit <= MAX_PLACES:
         raise ValueError("invalid placeLimit")
+    for campus, campus_config in (config.get("campuses") or {}).items():
+        if type(campus_config.get("displayCoverage", False)) is not bool:
+            raise ValueError(f"invalid displayCoverage for campus: {campus}")
     return config
 
 
+def poi_source_paths(base: Path) -> list[Path]:
+    """Return every POI dataset that can feed the heatmap builder.
+
+    Campus-specific files use the same ``*_pois.json`` convention as the
+    runtime POI loader.  Keeping discovery here makes loading and cache
+    fingerprinting share one deterministic source list, so adding a campus
+    cannot silently reuse an old cache.
+    """
+    base = Path(base)
+    return sorted(base.glob("*_pois.json"), key=lambda path: path.name)
+
+
 def source_paths(base: Path) -> list[Path]:
+    template_path = base / "all_templates.json"
+    if not template_path.exists():
+        template_path = base / "../../data/all_templates.json"
     paths = [base / "heatmap_config.json", base / "scene_profiles.json",
-             base / "campus_pois.json"]
-    # 散步/约会专用的非植物 POI（座椅、共青场、凉亭等）为可选文件；
-    # 存在时纳入哈希，改变内容必须重建缓存。
-    scene_pois = base / "scene_pois.json"
-    if scene_pois.exists():
-        paths.append(scene_pois)
-    paths.extend([base / "../../data/all_templates.json", base / "scene_heatmaps.py",
+             *poi_source_paths(base)]
+    paths.extend([template_path, base / "scene_heatmaps.py",
                   base / "build_scene_heatmaps.py", base / "semantic_retrieval.py"])
     return paths
 
 
 def fingerprint(base: Path, model: str) -> str:
+    """指纹 = 算法版本 + 模型标识 + 被绑定的源文件内容。
+
+    源文件内容一律经 ``canonical_source_bytes`` 读取（行尾归一为 LF）：否则
+    Windows（`core.autocrlf=true`，检出为 CRLF）与 CI（LF）会算出不同指纹，
+    缓存会被永久误判为过期——见 `test_repository_cache_manifest_matches_current_sources`。
+    """
     digest = hashlib.sha256((ALGORITHM_VERSION + model).encode("utf-8"))
     for path in source_paths(base):
         digest.update(path.name.encode("utf-8"))
-        digest.update(path.read_bytes())
+        digest.update(canonical_source_bytes(path))
     return digest.hexdigest()
 
 
@@ -534,7 +574,29 @@ def normalize(values: np.ndarray, mask: np.ndarray) -> np.ndarray:
     return result
 
 
-def class_bandwidth(points: np.ndarray, origin: np.ndarray, config: dict) -> np.ndarray:
+#: 邻近距离的极小下限（米）：重复坐标点位的 k 近邻距离为 0，会让密度代理发散。
+_MIN_NEIGHBOUR_METERS = 1.0
+
+
+def _knn_distances(points: np.ndarray, k: int) -> np.ndarray:
+    """逐点的第 k 近邻距离；k 自动夹到 n-1。"""
+    count = len(points)
+    rank = max(1, min(int(k), count - 1))
+    distances = np.linalg.norm(points[:, None, :] - points[None, :, :], axis=2)
+    np.fill_diagonal(distances, np.inf)
+    if rank == 1:
+        return distances.min(axis=1)
+    return np.sort(distances, axis=1)[:, rank - 1]
+
+
+def _legacy_bandwidth(points: np.ndarray, origin: np.ndarray, config: dict) -> np.ndarray:
+    """旧版规则：按 ``zoneMeters`` 分格统计相对丰度，再乘全局近邻尺度。
+
+    保留它是为了可复现历史结果与做 A/B 对照（``adaptiveBandwidth.method = "legacy"``）。
+    已知缺陷：格内计数在小组（植物子类常常只有 2~4 棵）上退化——所有点落进同一格时
+    ``abundance`` 恒等，自适应项完全失效；叠加 ``maxInfluenceMeters`` 钳位后，
+    实测 846 个分组里有 256 组带宽在组内完全相等。
+    """
     if len(points) < 2:
         annd = config["minInfluenceMeters"]
     else:
@@ -546,6 +608,86 @@ def class_bandwidth(points: np.ndarray, origin: np.ndarray, config: dict) -> np.
     abundance = np.array([counts[tuple(zone)] / len(points) for zone in zones])
     radius = np.exp(abundance) * max(annd, config["minInfluenceMeters"])
     return np.minimum(radius, config["maxInfluenceMeters"]) / 3
+
+
+def adaptive_bandwidth(points: np.ndarray, config: dict,
+                       legacy_bandwidth: np.ndarray | None = None) -> np.ndarray:
+    """k 近邻局部密度驱动的连续变量带宽（**尺度保持**）。
+
+    公式（``β`` 即配置里的 ``densityExponent``）::
+
+        h_target = clip( geomean(旧规则的逐点带宽), h_lo, h_hi )      # 只借用量级
+        ρ_i      = 1 / max(d_k(x_i), 1m)²                            # 连续局部密度代理
+        z_i      = (logρ_i − median(logρ)) / (1.4826·MAD)            # 稳健标准化
+        w_i      = 0.5 + 0.5·tanh(β·z_i)                             # ∈ (0, 1)
+        h_i      = clip( h_target · (h_hi/h_lo)^(w_i − 0.5), h_lo, h_hi )
+
+    三个刻意的设计选择：
+
+    1. **只改"组内分布"，不改"整体量级"**：锚点取旧规则逐点带宽的**几何均值**，
+       保证升级前后每个分组的带宽量级一致。这样热力场的整体尺度不变、点位推荐不会
+       因尺度漂移而大面积换名——在没有人工标注、无法证明"更准"的前提下，
+       这是唯一能同时做到"修好缺陷"与"不制造回归"的口径。
+    2. **连续且不饱和**：组内分布改由 k 近邻局部密度决定，不再按 ``zoneMeters`` 分格计数。
+       原规则里相距 1 米但跨格边界的两个点会得到不同带宽，且小组（2~4 个点）全部落进
+       同一格时自适应项**恒等失效**（实测 256/846 组带宽在组内完全相等，151/846 组被
+       ``maxInfluence`` 钳成常数 100m）。现在改为在 ``[h_lo, h_hi]`` 区间内做**几何**伸缩，
+       既不依赖栅格、也不会被钳位压平。
+    3. **方向可配**：``β>0`` 保持项目既有语义（越密 → 带宽越大，密集区连成一片宽热区）；
+       ``β=0`` 精确退化为固定带宽（做 A/B 对照用）；``β<0`` 即教科书 Abramov/Abramson
+       方向（越密 → 带宽越小，用于锐化密集区）。两种学派都能用同一套评测脚本量化比较。
+
+    少于 3 个点时没有"局部"可言，直接返回 ``h_target``。
+    """
+    settings = config.get("adaptiveBandwidth") or {}
+    bandwidth_exponent = float(settings.get("densityExponent", 1.0))
+    neighbour_k = int(settings.get("neighbourK", 4))
+    low = float(config["minInfluenceMeters"]) / 3
+    high = float(config["maxInfluenceMeters"]) / 3
+    if high < low:  # 配置异常时不让区间反转
+        low, high = high, low
+
+    if legacy_bandwidth is None:
+        legacy_bandwidth = _legacy_bandwidth(points, np.zeros(2), config)
+    anchor = np.maximum(np.asarray(legacy_bandwidth, dtype=float), 1e-6)
+    h_target = float(np.clip(np.exp(np.mean(np.log(anchor))), low, high))
+
+    if len(points) < 3 or bandwidth_exponent == 0:
+        return np.full(len(points), h_target)
+
+    dense = np.maximum(_knn_distances(points, neighbour_k), _MIN_NEIGHBOUR_METERS)
+    log_density = -2.0 * np.log(dense)          # log ρ ∝ −2·log d_k
+    middle = float(np.median(log_density))
+    scale = 1.4826 * float(np.median(np.abs(log_density - middle)))  # MAD → σ 的一致估计
+    if scale <= 1e-9:
+        return np.full(len(points), h_target)
+    z = (log_density - middle) / scale
+    weight = 0.5 + 0.5 * np.tanh(bandwidth_exponent * z)
+    if high > low:
+        h = h_target * np.power(high / low, weight - 0.5)
+    else:
+        return np.full(len(points), h_target)
+    h = np.clip(h, low, high)
+    # 一步尺度回正：伸缩后若有较多点被钳到区间边界，组内几何均值会漂移。
+    # 把整体乘回去，让"升级前后组内量级一致"这条不变量尽量精确成立（钳位仍然优先）。
+    current = float(np.exp(np.mean(np.log(np.maximum(h, 1e-6)))))
+    if current > 1e-6:
+        h = np.clip(h * (h_target / current), low, high)
+    return h
+
+
+def class_bandwidth(points: np.ndarray, origin: np.ndarray, config: dict) -> np.ndarray:
+    """逐点带宽入口：按配置分派到 k 近邻自适应（默认）或旧版分格规则。
+
+    ``origin`` 仅旧版规则使用（分区锚点），保留参数是为了签名与既有调用点稳定。
+    自适应规则把旧规则的几何均值当作尺度锚点，因此这里先算出旧结果再传下去，
+    顺带避免同分组重复计算一次距离矩阵。
+    """
+    legacy = _legacy_bandwidth(points, origin, config)
+    settings = config.get("adaptiveBandwidth") or {}
+    if settings.get("method", "legacy") == "knn-density" and len(points) >= 2:
+        return adaptive_bandwidth(points, config, legacy)
+    return legacy
 
 
 def kernel_field(grid: np.ndarray, points: np.ndarray, bandwidth: np.ndarray,
@@ -582,10 +724,11 @@ def prepare_geometry(pois: list[dict], campus: str, config: dict,
                      scene: str | None = None) -> dict:
     selected = [p for p in pois if p["campus"] == campus]
     if len(selected) < 3:
-        raise ValueError(f"{campus}: insufficient spatial coverage")
+        raise InsufficientSpatialCoverage(f"{campus}: insufficient spatial coverage")
     center = config["campuses"][campus]["center"]
     xy = to_meters([[p["lng"], p["lat"]] for p in selected], center)
     cell = config["cellMeters"]
+    # Restore the original data-shaped extent, not a campus-centred circle.
     low = np.floor(xy.min(axis=0) / cell) * cell - cell
     high = np.ceil(xy.max(axis=0) / cell) * cell + cell
     width, height = np.ceil((high-low) / cell).astype(int)
@@ -620,7 +763,8 @@ def prepare_geometry(pois: list[dict], campus: str, config: dict,
                 groups=groups, bands=bands, class_categories=class_categories,
                 width=int(width), height=int(height),
                 bounds=to_lnglat(np.array([low, high]), center).ravel().tolist(),
-                center=center, config=config, campus=campus, scene=scene)
+                center=center, config=config, campus=campus, scene=scene,
+                displayCoverage=config["campuses"][campus].get("displayCoverage", False))
 
 
 def _unit_scale(values: np.ndarray, mask: np.ndarray) -> np.ndarray:
@@ -737,7 +881,7 @@ def build_map(geometry: dict, scene: str, similarities: dict[str, float],
     field, contributions, betas = fuse_fields(geometry, similarities, plant_priors, season, scene,
                                               class_weights)
     raster = np.where(geometry["mask"], np.rint(field * 1000), -1).astype(int)
-    return {
+    payload = {
         "available": True, "algorithm": ALGORITHM_VERSION,
         "campus": geometry["campus"], "scene": scene,
         "sceneName": geometry["config"]["scenes"][scene],
@@ -755,11 +899,19 @@ def build_map(geometry: dict, scene: str, similarities: dict[str, float],
                                 "count": len(geometry["groups"][name]),
                                 "bandwidthMeters": geometry["bands"][name]}
                                for name in sorted(betas, key=lambda n: -similarities.get(n, 0))],
-        "disclaimer": DISCLAIMER, "boundarySource": "poi_convex_hull_with_support_mask",
+        "disclaimer": DISCLAIMER,
+        "boundarySource": "poi_convex_hull_with_support_mask",
         "coordinateSystem": geometry["config"]["coordinateSystem"],
         "normalization": "within_campus_and_scene_only",
         "negativeContribution": geometry["config"]["negativeContribution"],
     }
+    if geometry.get("displayCoverage"):
+        # Display-only coverage: never mixed into intensity, scores or rankings.
+        # Keep the original data boundary visible even in low-heat areas.
+        coverage = geometry["mask"] if np.any(field > 0) else np.zeros_like(geometry["mask"])
+        payload["grid"]["coverage"] = (coverage.astype(int) * 1000).tolist()
+        payload["coverageMeaning"] = "display_context_only_not_hotspot_evidence"
+    return payload
 
 
 class HeatmapStore:
@@ -772,7 +924,13 @@ class HeatmapStore:
         self._memory = {}
 
     def get(self, campus: str, scene: str) -> dict:
-        if campus not in ("普陀", "闵行") or scene not in SCENE_IDS:
+        if scene not in SCENE_IDS:
+            raise ValueError("请选择有效校区和四类场景之一")
+        try:
+            config = load_config(self.base)
+        except (OSError, ValueError, KeyError, TypeError, AttributeError, IndexError) as exc:
+            raise HeatmapUnavailable("热力图缓存不可用，请运行 python build_scene_heatmaps.py") from exc
+        if campus not in (config.get("campuses") or {}):
             raise ValueError("请选择有效校区和四类场景之一")
         if os.getenv("HEATMAP_ENABLED", "true").lower() in {"0", "false", "off"}:
             raise HeatmapUnavailable("场景热力图已关闭")
@@ -782,7 +940,6 @@ class HeatmapStore:
             try:
                 # A missing/broken optional configuration must not prevent the
                 # original Flask service from starting or serving old requests.
-                config = load_config(self.base)
                 meta = json.loads((self.cache / "manifest.json").read_text(encoding="utf-8"))
                 current_hash = fingerprint(self.base, self.model)
                 if meta.get("sourceHash") != current_hash:
@@ -798,6 +955,12 @@ class HeatmapStore:
                             f"语义模型标识不一致（后端 {self.model}，缓存 {meta.get('model')}），"
                             "请重启后端或重建缓存")
                     raise HeatmapUnavailable("热力图缓存已过期，请运行 python build_scene_heatmaps.py")
+                skipped = (meta.get("skippedHeatmaps") or {}).get(campus) or {}
+                reason = skipped.get(scene)
+                if reason:
+                    if not isinstance(reason, str):
+                        raise ValueError("invalid skipped heatmap reason")
+                    raise HeatmapUnavailable(reason)
                 key = (current_hash, campus, scene, season)
                 if key not in self._memory:
                     slug = config["campuses"][campus]["slug"]
@@ -831,6 +994,12 @@ def validate_payload(data: dict, campus: str, scene: str):
     if (not np.isfinite(bounds).all() or not (bounds[0] < bounds[2] and bounds[1] < bounds[3])
             or not np.isfinite(values).all() or not (((values >= 0) & (values <= 1000)) | (values == -1)).all()):
         raise ValueError("invalid heatmap grid values")
+    if "coverage" in grid:
+        coverage = np.asarray(grid["coverage"], dtype=float)
+        if (coverage.shape != values.shape or not np.isfinite(coverage).all()
+                or not ((coverage >= 0) & (coverage <= 1000)).all()
+                or np.any(coverage[values == -1] != 0)):
+            raise ValueError("invalid heatmap display coverage")
     if not isinstance(data["places"], list) or len(data["places"]) > MAX_PLACES:
         raise ValueError("invalid heatmap places")
     for place in data["places"]:

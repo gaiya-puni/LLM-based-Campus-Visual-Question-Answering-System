@@ -1,6 +1,11 @@
 {
-  "version": 3,
-  "cellMeters": 20,
+  "version": 4,
+  "cellMeters": 12,
+  "adaptiveBandwidth": {
+    "method": "knn-density",
+    "neighbourK": 4,
+    "densityExponent": 1.0
+  },
   "zoneMeters": 200,
   "minInfluenceMeters": 80,
   "maxInfluenceMeters": 300,
@@ -29,7 +34,8 @@
         121.406079,
         31.227073
       ],
-      "auditRadiusMeters": 1600
+      "auditRadiusMeters": 1600,
+      "displayCoverage": true
     },
     "闵行": {
       "slug": "minhang",
@@ -37,7 +43,8 @@
         121.453725,
         31.03148
       ],
-      "auditRadiusMeters": 2300
+      "auditRadiusMeters": 2300,
+      "displayCoverage": true
     }
   },
   "scenes": {

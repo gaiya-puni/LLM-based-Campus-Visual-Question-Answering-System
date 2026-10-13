@@ -1,0 +1,15 @@
+# CI 专用依赖：故意**不含** sentence-transformers。
+#
+# 原因见 pyproject.toml / CI 注释：句向量模型依赖体积大（torch 约 2GB+），会让每次 CI
+# 变得很慢；而所有语义相关代码都是惰性导入，依赖缺失时后端自动回退关键词规则，
+# 测试套件因此可以在"没有模型"的环境里完整跑通。
+Flask==3.1.3
+Flask-Cors==6.0.5
+Flask-Login==0.6.3
+python-dotenv==1.2.2
+PyMySQL==1.2.0
+requests==2.34.2
+Werkzeug==3.1.8
+numpy==1.26.4
+pytest==9.1.1
+ruff==0.17.0

@@ -2,6 +2,8 @@
 
 华东师范大学校园可视问答系统
 
+最新交付说明：[2026-10-06 项目更新与体验指南](PROJECT_UPDATE_2026-10-06.md)
+
 ---
 
 ## 🖥️ 如何查看
@@ -24,14 +26,39 @@
 步骤1.开命令行开启后端
 ```powershell
 Copy-Item .env.example .env
-# 编辑 .env，填写已轮换的 DeepSeek/MySQL/讯飞配置
+# 编辑 .env：选择大模型服务商（LLM_PROVIDER=deepseek 或 chatecnu）并填写 MySQL/讯飞配置
 cd webapp/backend
 pip install -r requirements.txt
 python server.py
 ```
 
+**大模型服务商**：默认 `deepseek`，也可改用华东师范大学的 `chatecnu` —— 两者都是 OpenAI 兼容
+接口，调用代码完全复用，只需在 `.env` 里切换 `LLM_PROVIDER`。`deepseek` 读 `DEEPSEEK_API_KEY`
+/ `DEEPSEEK_API_URL` / `DEEPSEEK_MODEL`，`chatecnu` 读 `CHATECNU_API_KEY` / `CHATECNU_API_URL`
+/ `CHATECNU_MODEL`（URL 与模型名都有默认值，只有密钥必须自己填）。
+
+**选中的服务商没有配密钥时，`/api/chat` 会明确返回“AI 服务尚未配置”，不会自动切换到另一个
+服务商**，避免调用方误判数据流向。后端启动时会在控制台打印当前生效的服务商与模型名，便于排查。
+
 仓库不包含密钥。`.env` 已被 Git 忽略，禁止把真实凭据写回源码或提交到仓库。
-仓库已包含当前数据对应的语义向量索引；只有 POI 或场景语料变化时才需要运行 `build_semantic_index.py` 重新生成。
+
+**自动搜索公开网页**：校园热力图生成页支持 Tavily（默认）和 Brave Search。在项目根目录
+`.env` 中至少配置 `USERDATA_REVIEW_TOKEN`，再选择并填写一组搜索配置：
+
+```dotenv
+WEB_SEARCH_PROVIDER=tavily
+TAVILY_API_KEY=tvly-你的密钥
+
+# 或改为 brave，并填写 BRAVE_SEARCH_API_KEY
+```
+
+重启后端后打开 `http://localhost/#/campus-build`，勾选“自动搜索公开网页”即可。系统只把搜索
+结果作为候选来源：最多两条查询、十个 HTTPS 页面、每域默认两页；页面还会经过公网地址、重定向、
+类型和大小校验，最终必须人工审核。完整配置和接口示例见
+[校园资产生成器说明](tools/campus_generator/CAMPUS_GENERATOR.md)。
+
+仓库已包含当前 3122 条 POI 对应的语义向量索引；新增、删除、重命名 POI 文件或修改场景语料后，
+运行时会明确标记索引过期，此时需要运行 `build_semantic_index.py` 重新生成。
 
 语义检索相关环境变量：
 
@@ -52,8 +79,11 @@ SEMANTIC_INDEX_META_FILE=semantic_index_meta.json
 python evaluate_semantic_queries.py --strict
 ```
 
-第二阶段新增四类校园场景热图（两个校区共8张），不改变原有精确地点查询。
-仓库已包含当前数据对应的离线热力图缓存，启动后端即可在智能问答页面选择“场景热图”。数据或算法变化后，可在后端目录运行 `python build_scene_heatmaps.py` 重新生成。
+第二阶段的四类校园场景热图现已接入华师大普陀、华师大闵行和交大闵行。交大当前没有植物点位，
+因此“赏花”会明确提示有效点位不足，拍照、散步和约会仍正常可用；其余两校区四类场景均可用。
+仓库已包含当前数据对应的 26 份离线热力图缓存，启动后端即可在智能问答页面选择“场景热图”。
+数据或算法变化后，可在后端目录运行 `python build_scene_heatmaps.py` 重新生成。两个构建脚本均默认只读本地模型；
+首次需要下载模型时显式加 `--allow-download`，也可用 `--output-dir` 先写入临时目录验收。
 也可切回“原版推荐”进行对照。算法说明、数据限制和测试步骤见
 [第二阶段说明](webapp/backend/PHASE2_HEATMAPS.md)。
 

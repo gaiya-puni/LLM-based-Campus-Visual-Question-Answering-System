@@ -3,8 +3,12 @@
     <!-- 左侧地图 -->
     <div class="map-panel">
       <div class="campus-toggle">
-        <button :class="['campus-btn', { active: activeCampus === '普陀' }]" @click="switchCampus('普陀')">普陀校区</button>
-        <button :class="['campus-btn', { active: activeCampus === '闵行' }]" @click="switchCampus('闵行')">闵行校区</button>
+        <button
+          v-for="campus in CAMPUSES"
+          :key="campus.slug"
+          :class="['campus-btn', { active: activeCampus === campus.name }]"
+          @click="switchCampus(campus.name)"
+        >{{ campus.name }}校区</button>
       </div>
       <div id="chat-map"></div>
       <SceneHeatmapPanel :map="heatmapMap" :campus="activeCampus" :mode="recommendationMode"
@@ -47,14 +51,41 @@
           </div>
         </div>
 
-        <div v-for="(msg, index) in messages" :key="index" :class="['message-item', msg.type]">
+        <div v-for="msg in messages" :key="msg.id" :class="['message-item', msg.type]">
           <div :class="['avatar', msg.type === 'user' ? 'avatar-user' : 'avatar-bot']">
             <div v-if="msg.type === 'user'" class="user-avatar-icon"><User /></div>
             <img v-else src="@/assets/ecnu-logo.png" class="avatar-img" alt="ECNU" />
           </div>
           <div :class="['message-bubble', msg.type === 'user' ? 'user-bubble' : 'bot-bubble']">
-            <p v-if="msg.type === 'user'">{{ msg.content }}</p>
+            <div v-if="msg.type === 'user'">
+              <div v-if="msg.images?.length" class="message-images">
+                <img
+                  v-for="(src, index) in msg.images"
+                  :key="index"
+                  :src="src"
+                  class="message-image"
+                  alt="随消息上传的图片"
+                />
+              </div>
+              <p>{{ msg.content }}</p>
+            </div>
             <p v-else v-html="parseMarkdown(msg.content)"></p>
+            <div v-if="msg.type === 'bot' && msg.unsupported" class="place-report-prompt">
+              <div>
+                <strong>知道这个地点？</strong>
+                <span>欢迎补充名称和位置，审核后会进入校园数据。</span>
+              </div>
+              <button type="button" class="place-report-btn" @click="openPlaceReport(msg)">去补充</button>
+            </div>
+            <MessageFeedback
+              v-if="msg.type === 'bot' && msg.query"
+              :message-id="msg.id"
+              :query="msg.query"
+              :engine="msg.engine"
+              :campus="msg.campus"
+              :value="msg.rating"
+              @submitted="updateMessageRating(msg, $event)"
+            />
             <span class="message-time">{{ msg.time }}</span>
           </div>
         </div>
@@ -71,12 +102,63 @@
         </div>
       </div>
 
-      <!-- 输入区域 -->
-      <div class="chat-input-area">
+      <!-- 输入区域：支持点击选择 / 拖拽 / 直接粘贴 / 移动端拍照 -->
+      <div
+        class="chat-input-area"
+        :class="{ 'is-dragging': isDragging }"
+        @dragover.prevent="onDragOver"
+        @dragleave.prevent="isDragging = false"
+        @drop.prevent="onDrop"
+        @paste="onPaste"
+      >
+        <div v-if="attachments.length || attachmentNotice" class="attachment-strip">
+          <div v-for="item in attachments" :key="item.id" class="attachment-chip">
+            <img :src="item.dataUrl" class="attachment-thumb" :alt="item.name" />
+            <span class="attachment-meta">{{ item.sizeLabel }}</span>
+            <button
+              type="button"
+              class="attachment-remove"
+              title="移除这张图片"
+              @click="removeAttachment(item.id)"
+            >×</button>
+          </div>
+          <span v-if="attachmentNotice" class="attachment-notice">{{ attachmentNotice }}</span>
+          <span v-else-if="!visionAvailable" class="attachment-notice warn">
+            本部署未启用图片理解，图片将无法被识别，建议直接用文字描述地点
+          </span>
+        </div>
         <div class="input-wrapper">
+          <input
+            ref="fileInput"
+            type="file"
+            :accept="IMAGE_ACCEPT"
+            multiple
+            hidden
+            @change="onFilePicked"
+          />
+          <input
+            ref="cameraInput"
+            type="file"
+            accept="image/*"
+            capture="environment"
+            hidden
+            @change="onFilePicked"
+          />
+          <el-button
+            class="attach-btn"
+            :disabled="isLoading || attachments.length >= MAX_ATTACHMENTS"
+            title="添加图片（也可直接拖入或粘贴，最多 2 张）"
+            @click="openFilePicker"
+          >🖼️</el-button>
+          <el-button
+            class="attach-btn"
+            :disabled="isLoading || attachments.length >= MAX_ATTACHMENTS"
+            title="拍照并识别图中地点"
+            @click="openCamera"
+          >📷</el-button>
           <el-input
             v-model="inputMessage"
-            placeholder="输入您的问题..."
+            placeholder="输入您的问题，或上传一张校园照片问「这是哪儿」"
             class="input-field"
             @keyup.enter="sendMessage(inputMessage)"
             :disabled="isLoading"
@@ -85,7 +167,7 @@
               <el-button
                 type="primary"
                 @click="sendMessage(inputMessage)"
-                :disabled="!inputMessage.trim() || isLoading"
+                :disabled="(!inputMessage.trim() && !attachments.length) || isLoading"
                 class="send-btn"
               >发送</el-button>
             </template>
@@ -93,6 +175,12 @@
         </div>
       </div>
     </div>
+
+    <PlaceReportDialog
+      v-model="placeReportOpen"
+      :campus="placeReportContext.campus"
+      :query-snippet="placeReportContext.query"
+    />
   </div>
 </template>
 
@@ -102,9 +190,25 @@ import { marked } from "marked";
 import DOMPurify from 'dompurify';
 import SceneHeatmapPanel from '../components/SceneHeatmapPanel.vue';
 import ItineraryPanel from '../components/ItineraryPanel.vue';
+import MessageFeedback from '../components/MessageFeedback.vue';
+import PlaceReportDialog from '../components/PlaceReportDialog.vue';
 import type { HeatmapPayload } from '../components/sceneHeatmapTypes';
 import type { ItineraryPayload, ItineraryStop } from '../components/itineraryTypes';
+import type { FeedbackRating } from '../api/userdata';
+import {
+  MAX_ATTACHMENTS,
+  buildAttachments,
+  payloadForRequest,
+  pickImageFiles,
+  type ImageAttachment,
+} from '../components/imageAttach';
 import { loadAMap } from '../amap';
+import {
+  CAMPUSES,
+  CAMPUS_CENTERS,
+  CAMPUS_LOCATION_RADIUS_M,
+  DEFAULT_CAMPUS,
+} from '../campusConfig';
 
 marked.setOptions({ breaks: true, gfm: true });
 const parseMarkdown = (text: string) => DOMPurify.sanitize(
@@ -112,7 +216,20 @@ const parseMarkdown = (text: string) => DOMPurify.sanitize(
   { USE_PROFILES: { html: true } }
 );
 
-interface Message { type: 'user' | 'bot'; content: string; time: string; }
+interface Message {
+  id: string;
+  type: 'user' | 'bot';
+  content: string;
+  time: string;
+  createdAt: string;
+  query?: string;
+  engine?: string;
+  campus?: string;
+  unsupported?: boolean;
+  rating?: FeedbackRating | null;
+  /** 该轮随消息上传的图片（仅用于回显，历史轮次不会重发给后端）。 */
+  images?: string[];
+}
 interface Location {
   name: string;
   lng: number;
@@ -149,12 +266,22 @@ const isLoading = ref(false);
 const messagesContainer = ref<HTMLElement | null>(null);
 const mapLocations = ref<Location[]>([]);
 const allLocations = ref<Location[]>([]);
-const activeCampus = ref('普陀');
+const activeCampus = ref<string>(DEFAULT_CAMPUS);
 const userLocation = ref<UserLocation | null>(null);
 const recommendationMode = ref('sakde');
 const heatmapMap = shallowRef<any>(null);
 const heatmapResponse = shallowRef<HeatmapPayload | null>(null);
 const itineraryResponse = shallowRef<ItineraryPayload | null>(null);
+const placeReportOpen = ref(false);
+const placeReportContext = ref({ query: '', campus: '' });
+// ---- 图片附件（见 components/imageAttach.ts；口径与后端同源）----
+const attachments = ref<ImageAttachment[]>([]);
+const attachmentNotice = ref('');
+const isDragging = ref(false);
+/** 后端 `/api/health` 的 vision 字段；未配置视觉模型时给出明确提示而不是让用户白等。 */
+const visionAvailable = ref(true);
+const fileInput = ref<HTMLInputElement | null>(null);
+const cameraInput = ref<HTMLInputElement | null>(null);
 // 行程面板必须与地图保持一致：切到别的校区时该行程的标记已被过滤掉，面板也不应再显示。
 // 只做显示层过滤、不清数据，切回原校区即自动恢复。
 const visibleItinerary = computed(() =>
@@ -183,14 +310,6 @@ const panelItinerary = computed(() => {
 const heatmapActive = ref(false);
 const heatmapReset = ref(0);
 
-const CAMPUS_CENTERS: Record<string, [number, number]> = {
-  '普陀': [121.406079, 31.227073],
-  '闵行': [121.453725, 31.03148],
-};
-const CAMPUS_LOCATION_RADIUS_M: Record<string, number> = {
-  '普陀': 1300,
-  '闵行': 2200,
-};
 const MAX_GEO_ACCURACY_M = 800;
 
 let map: any = null;
@@ -202,6 +321,18 @@ let geolocation: any = null;
 // 行程路线使用独立实例数组，与单点导航（walking）互不干扰地清理与绘制。
 let itineraryWalkings: any[] = [];
 let itineraryRouteToken = 0;
+let campusPinned = false;
+
+const isKnownCampus = (value: unknown): value is string => (
+  typeof value === 'string'
+  && Object.prototype.hasOwnProperty.call(CAMPUS_CENTERS, value)
+);
+const resolveCampus = (value: unknown): string => (
+  isKnownCampus(value) ? value : DEFAULT_CAMPUS
+);
+const centerForCampus = (value: unknown): [number, number] => (
+  CAMPUS_CENTERS[resolveCampus(value)]
+);
 
 const resetItineraryRouteState = () => {
   itineraryRouteToken++;
@@ -215,7 +346,7 @@ const mapError = ref('');
 const initMap = () => {
   map = new (window as any).AMap.Map('chat-map', {
     zoom: 16,
-    center: CAMPUS_CENTERS[activeCampus.value],
+    center: centerForCampus(activeCampus.value),
   });
   heatmapMap.value = map;
 };
@@ -237,11 +368,12 @@ const nearestCampusByLocation = (lng: number, lat: number) => {
 };
 
 const campusCenterLocation = (campus = activeCampus.value): UserLocation => {
-  const center = CAMPUS_CENTERS[campus] || CAMPUS_CENTERS['普陀'];
+  const resolvedCampus = resolveCampus(campus);
+  const center = centerForCampus(resolvedCampus);
   return {
     lng: center[0],
     lat: center[1],
-    campus,
+    campus: resolvedCampus,
     trusted: false,
     campusTrusted: false,
     useForDistance: false,
@@ -319,9 +451,10 @@ const detectUserCampus = async () => {
   const assessed = await getAmapCurrentLocation();
   if (assessed?.trusted) {
     userLocation.value = assessed;
-    if (assessed.campusTrusted) {
-      activeCampus.value = assessed.campus;
-      map?.setCenter(CAMPUS_CENTERS[assessed.campus]);
+    if (assessed.campusTrusted && !campusPinned) {
+      activeCampus.value = resolveCampus(assessed.campus);
+      map?.setCenter(centerForCampus(activeCampus.value));
+      filterAndShow();
     }
   } else {
     userLocation.value = campusCenterLocation(activeCampus.value);
@@ -495,21 +628,23 @@ const setRecommendationMode = (mode: string) => {
 };
 
 const switchToFirstAvailableCampus = () => {
-  const firstCampus = allLocations.value.find(loc => loc.campus)?.campus;
+  const firstCampus = allLocations.value.find(loc => isKnownCampus(loc.campus))?.campus;
   if (!firstCampus || firstCampus === activeCampus.value) return;
   activeCampus.value = firstCampus;
-  map?.setCenter(CAMPUS_CENTERS[firstCampus]);
+  map?.setCenter(centerForCampus(firstCampus));
   map?.setZoom(16);
   filterAndShow();
 };
 
 // 手动切换校区：移动地图中心 + 重新过滤标记
 const switchCampus = (campus: string) => {
-  activeCampus.value = campus;
+  const resolvedCampus = resolveCampus(campus);
+  campusPinned = true;
+  activeCampus.value = resolvedCampus;
   if (!userLocation.value?.trusted || userLocation.value.source !== 'amap') {
-    userLocation.value = campusCenterLocation(campus);
+    userLocation.value = campusCenterLocation(resolvedCampus);
   }
-  map?.setCenter(CAMPUS_CENTERS[campus]);
+  map?.setCenter(centerForCampus(resolvedCampus));
   map?.setZoom(16);
   filterAndShow();
 };
@@ -565,6 +700,14 @@ const navigateTo = (destLng: number, destLat: number) => {
 };
 
 onMounted(() => {
+  // 探测本部署是否启用图片理解：只影响提示文案，不阻断上传（换了 .env 不必刷新即可试）。
+  fetch('/api/health')
+    .then((response) => (response.ok ? response.json() : null))
+    .then((payload) => {
+      if (payload && typeof payload.vision === 'boolean') visionAvailable.value = payload.vision;
+    })
+    .catch(() => { /* 后端没起来时保持默认，发送时会走"未连接后端"的提示 */ });
+
   nextTick(async () => {
     try {
       await loadAMap();
@@ -587,17 +730,124 @@ onUnmounted(() => {
 });
 
 const CHAT_API_URL = '/api/chat';
-const getCurrentTime = () => {
-  const now = new Date();
+
+/** 后端返回了明确原因（图片超限、格式不支持等）时用它区分"未连接后端"。 */
+class ChatRequestError extends Error {}
+/** 与 imageAttach.ALLOWED_MIMES 对应（这里写成 accept 字符串给 file input 用）。 */
+const IMAGE_ACCEPT = 'image/jpeg,image/png,image/webp';
+
+/**
+ * 把一批文件收进附件栏：过滤非图片 → 本地压缩 → 逐张校验体积/张数。
+ * 失败时给出**可操作的中文提示**，而不是静默丢弃。
+ */
+const applyFiles = async (files: File[]) => {
+  const images = pickImageFiles(files);
+  if (!images.length) {
+    attachmentNotice.value = '只支持 JPG / PNG / WebP 图片';
+    return;
+  }
+  attachmentNotice.value = '';
+  const outcome = await buildAttachments(images, attachments.value.length);
+  if (outcome.items.length) {
+    attachments.value = [...attachments.value, ...outcome.items];
+  }
+  attachmentNotice.value = outcome.error || outcome.notice;
+};
+
+const openFilePicker = () => fileInput.value?.click();
+const openCamera = () => cameraInput.value?.click();
+
+const onFilePicked = async (event: Event) => {
+  const input = event.target as HTMLInputElement;
+  await applyFiles(Array.from(input.files || []));
+  // 清空 value：否则连续选择同一张图不会触发 change
+  input.value = '';
+};
+
+const onDragOver = () => { isDragging.value = true; };
+
+const onDrop = async (event: DragEvent) => {
+  isDragging.value = false;
+  await applyFiles(Array.from(event.dataTransfer?.files || []));
+};
+
+/** 只在输入区聚焦时生效（监听挂在输入区容器上，不影响页面其它复制粘贴）。 */
+const onPaste = async (event: ClipboardEvent) => {
+  const files = Array.from(event.clipboardData?.files || []);
+  if (!files.length) return;
+  event.preventDefault();
+  await applyFiles(files);
+};
+
+const removeAttachment = (id: string) => {
+  attachments.value = attachments.value.filter((item) => item.id !== id);
+  attachmentNotice.value = '';
+};
+const getCurrentTime = (now = new Date()) => {
   return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
 };
 
+const createMessageId = () => {
+  const cryptoApi = globalThis.crypto;
+  if (typeof cryptoApi?.randomUUID === 'function') return cryptoApi.randomUUID();
+  return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+};
+
+const createMessage = (
+  type: Message['type'],
+  content: string,
+  metadata: Partial<Omit<Message, 'id' | 'type' | 'content' | 'time' | 'createdAt'>> = {},
+): Message => {
+  const createdAt = new Date();
+  return {
+    id: createMessageId(),
+    type,
+    content,
+    time: getCurrentTime(createdAt),
+    createdAt: createdAt.toISOString(),
+    ...metadata,
+  };
+};
+
+const responseEngine = (data: any): string => {
+  if (typeof data?.recommendation_engine === 'string' && data.recommendation_engine.trim()) {
+    return data.recommendation_engine.trim();
+  }
+  if (data?.unsupported) return 'unsupported';
+  if (data?.itinerary) return 'itinerary';
+  if (data?.heatmap) return 'sakde';
+  return 'llm';
+};
+
+const updateMessageRating = (
+  message: Message,
+  payload: { rating: FeedbackRating; reason: string },
+) => {
+  message.rating = payload.rating === 'none' ? null : payload.rating;
+};
+
+const openPlaceReport = (message: Message) => {
+  placeReportContext.value = {
+    query: message.query || '',
+    campus: message.campus || activeCampus.value,
+  };
+  placeReportOpen.value = true;
+};
+
 const sendMessage = async (content: string) => {
-  if (!content.trim() || isLoading.value) return;
+  const query = content.trim();
+  const pending = attachments.value.slice();
+  // 允许"只发图不发字"：图片本身就是问题（这是哪儿）。
+  if ((!query && !pending.length) || isLoading.value) return;
+  const outgoing = query || '请看这张图片，这是校园里的哪儿？';
   heatmapResponse.value = null;
   heatmapReset.value++;
-  messages.value.push({ type: 'user', content: content.trim(), time: getCurrentTime() });
+  messages.value.push(
+    createMessage('user', outgoing, pending.length ? { images: pending.map(i => i.dataUrl) } : {}),
+  );
   inputMessage.value = '';
+  attachments.value = [];
+  attachmentNotice.value = '';
   isLoading.value = true;
   await nextTick();
   scrollToBottom();
@@ -619,30 +869,61 @@ const sendMessage = async (content: string) => {
         })),
         userCampus: activeCampus.value,
         userLocation: requestLocation,
-        recommendationMode: recommendationMode.value
+        recommendationMode: recommendationMode.value,
+        // 附件只随本轮发出；历史轮次不回传 base64（后端也只并入最后一条用户消息）。
+        ...(pending.length ? { attachments: payloadForRequest(pending) } : {}),
       })
     });
-    if (!response.ok) throw new Error(`API请求失败: ${response.status}`);
+    if (!response.ok) {
+      // 后端对图片链路会回明确的中文原因（张数/类型/体积/请求体超限），优先展示它，
+      // 否则用户只会看到一句没有信息量的"请求失败"。
+      let detail = '';
+      try {
+        const payload = await response.json();
+        detail = String(payload?.error || payload?.message || '');
+      } catch { /* 非 JSON 响应：例如网关直接返回的 HTML 错误页 */ }
+      if (!detail && response.status === 413) {
+        detail = '图片过大，请压缩后重试（单张不超过 4MB，最多 2 张）';
+      }
+      if (detail) throw new ChatRequestError(detail);
+      throw new Error(`API请求失败: ${response.status}`);
+    }
     const data = await response.json();
-    messages.value.push({ type: 'bot', content: data.choices?.[0]?.message?.content || '抱歉，我暂时无法回答这个问题。', time: getCurrentTime() });
+    const botMessage = createMessage(
+      'bot',
+      data.choices?.[0]?.message?.content || '抱歉，我暂时无法回答这个问题。',
+      {
+        query,
+        engine: responseEngine(data),
+        campus: resolveCampus(
+          data.itinerary?.campus || data.locations?.[0]?.campus || activeCampus.value,
+        ),
+        unsupported: data.unsupported === true,
+        rating: null,
+      },
+    );
+    messages.value.push(botMessage);
     // 行程数据需先于地图渲染更新：绘制行程路线时会读 legs 判断哪些腿是骑行。
     resetItineraryRouteState();
     itineraryResponse.value = data.itinerary || null;
     if (data.locations?.length) {
       allLocations.value = pickMapLocations(data.locations);
-      const campuses = Array.from(new Set(allLocations.value.map(loc => loc.campus).filter(Boolean)));
+      const campuses = Array.from(new Set(
+        allLocations.value.map(loc => loc.campus).filter(isKnownCampus),
+      ));
       if (campuses.length === 1 && campuses[0] !== activeCampus.value) {
         activeCampus.value = campuses[0];
-        map?.setCenter(CAMPUS_CENTERS[activeCampus.value]);
+        map?.setCenter(centerForCampus(activeCampus.value));
         map?.setZoom(16);
       }
       filterAndShow();
       // 当前校区无此地点，但其他校区有 → 追加提示
       if (mapLocations.value.length === 0) {
         switchToFirstAvailableCampus();
-        const last = messages.value[messages.value.length - 1];
-        if (last?.type === 'bot' && mapLocations.value.length)
-          last.content += `\n\n> ⚠️ 您所在校区暂无该地点，已为您显示 **${activeCampus.value}校区** 的相关位置 🗺️`;
+        if (mapLocations.value.length) {
+          botMessage.campus = activeCampus.value;
+          botMessage.content += `\n\n> ⚠️ 您所在校区暂无该地点，已为您显示 **${activeCampus.value}校区** 的相关位置 🗺️`;
+        }
       }
     } else {
       allLocations.value = [];
@@ -653,19 +934,22 @@ const sendMessage = async (content: string) => {
     await nextTick();
     heatmapResponse.value = data.heatmap || null;
     if (data.heatmap_status) {
-      const last = messages.value[messages.value.length - 1];
-      if (last?.type === 'bot') last.content += `\n\n> 热图提示：${data.heatmap_status}。本次使用原版推荐。`;
+      botMessage.content += `\n\n> 热图提示：${data.heatmap_status}。本次使用原版推荐。`;
     }
     if (data.itinerary_status) {
-      const last = messages.value[messages.value.length - 1];
-      if (last?.type === 'bot') last.content += `\n\n> 行程提示：${data.itinerary_status}。`;
+      botMessage.content += `\n\n> 行程提示：${data.itinerary_status}。`;
     }
-  } catch {
-    messages.value.push({
-      type: 'bot',
-      content: '当前是本地演示模式，未连接后端智能问答服务。您仍可浏览植物图鉴、地图页面和静态可视化成果；如需体验完整问答，请按源码包说明启动 Flask 后端。',
-      time: getCurrentTime()
-    });
+  } catch (error) {
+    // 失败时把附件放回输入栏，用户不必重新选一遍图。
+    if (pending.length && !attachments.value.length) {
+      attachments.value = pending;
+    }
+    messages.value.push(createMessage(
+      'bot',
+      error instanceof ChatRequestError
+        ? `❌ ${error.message}`
+        : '当前是本地演示模式，未连接后端智能问答服务。您仍可浏览植物图鉴、地图页面和静态可视化成果；如需体验完整问答，请按源码包说明启动 Flask 后端。',
+    ));
   } finally {
     isLoading.value = false;
     await nextTick();
@@ -881,6 +1165,7 @@ const scrollToBottom = () => {
     border-radius: 16px;
     padding: 12px 16px;
     max-width: 80%;
+    min-width: 0;
     box-shadow: 0 2px 8px rgba(0,0,0,0.08);
     font-size: 14px;
 
@@ -893,9 +1178,70 @@ const scrollToBottom = () => {
       text-align: right;
       color: #999;
     }
+
+    .place-report-prompt {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 10px;
+      padding: 10px;
+      border: 1px solid #f3c6cb;
+      border-radius: 10px;
+      background: #fff7f8;
+
+      div {
+        display: flex;
+        min-width: 0;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      strong {
+        color: #a50918;
+        font-size: 13px;
+      }
+
+      span {
+        color: #7a6164;
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .place-report-btn {
+        min-height: 32px;
+        flex-shrink: 0;
+        padding: 6px 12px;
+        border: 1px solid #c20a1c;
+        border-radius: 999px;
+        background: #c20a1c;
+        color: #fff;
+        font-size: 12px;
+        cursor: pointer;
+        transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+
+        &:hover {
+          border-color: #a50918;
+          background: #a50918;
+          transform: translateY(-1px);
+        }
+
+        &:focus-visible {
+          outline: 2px solid rgba(194, 10, 28, 0.35);
+          outline-offset: 2px;
+        }
+      }
+    }
   }
 
   .bot-bubble { background: white; color: #333; }
+}
+
+@media (max-width: 520px) {
+  .message-item .message-bubble .place-report-prompt {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 
 .loading-message {
@@ -948,6 +1294,30 @@ const scrollToBottom = () => {
   border-top: 1px solid #eee;
   flex-shrink: 0;
 
+  &.is-dragging {
+    background: #fff5f5;
+    outline: 2px dashed #c20a1c;
+    outline-offset: -6px;
+  }
+
+  .input-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .attach-btn {
+    flex-shrink: 0;
+    padding: 8px 10px;
+    font-size: 16px;
+    line-height: 1;
+    color: #c20a1c;
+    border-color: #ffcdd2;
+    background: #fff5f5;
+
+    &:disabled { color: #c0c4cc; background: #f7f7f7; }
+  }
+
   .send-btn {
     background: linear-gradient(135deg, #c20a1c 0%, #a50918 100%);
     border: none;
@@ -955,6 +1325,74 @@ const scrollToBottom = () => {
 
     &:disabled { background: #ccc; }
   }
+}
+
+/* 附件预览条：缩略图 + 体积 + 单张移除；提示文案与图片同一行 */
+.attachment-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.attachment-chip {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 4px;
+  border: 1px solid #ffe0e0;
+  border-radius: 8px;
+  background: #fff9f9;
+}
+
+.attachment-thumb {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 6px;
+  display: block;
+}
+
+.attachment-meta {
+  font-size: 12px;
+  color: #909399;
+}
+
+.attachment-remove {
+  border: none;
+  background: transparent;
+  color: #c20a1c;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+
+  &:hover { color: #8f0714; }
+}
+
+.attachment-notice {
+  font-size: 12px;
+  color: #e6a23c;
+
+  &.warn { color: #c20a1c; }
+}
+
+/* 用户气泡里的图片：只做回显，不重发 */
+.message-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.message-image {
+  width: 96px;
+  max-height: 96px;
+  object-fit: cover;
+  border-radius: 8px;
+  display: block;
 }
 
 .chat-messages::-webkit-scrollbar { width: 5px; }

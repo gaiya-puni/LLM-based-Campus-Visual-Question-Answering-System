@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "test:heatmap": "node --test tests/heatmapRender.test.mjs",
     "build": "vue-tsc && vite build",
     "preview": "vite preview"
   },

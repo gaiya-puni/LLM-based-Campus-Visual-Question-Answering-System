@@ -15,16 +15,16 @@
       <p v-if="loading" role="status">正在读取{{ campus }}校区热图…</p>
       <p v-else-if="error" class="error" role="status">{{ error }}</p>
       <template v-else-if="visible && current">
-        <div class="legend-bar"></div>
+        <div class="legend-bar" :style="{ background: rampCss }"></div>
         <div class="legend-labels"><span>相对较低</span><span>{{ current.sceneName }}</span><span>相对较高</span></div>
         <p v-if="current.seasonLabel" class="season-tag" role="status">{{ current.seasonLabel }}花景参考</p>
         <label class="opacity-label">透明度
           <input aria-label="热图透明度" type="range" min="0.15" max="0.85" step="0.05" v-model.number="opacity" />
         </label>
         <p>仅在同一校区、同一场景内比较；非实时花期、人流或噪声。</p>
-        <p>边界为数据覆盖范围，通行情况未核实。点击地图标记查看依据。</p>
+        <p>淡色为点位数据覆盖范围，不代表热点；非正式校界。点击标记查看依据。</p>
       </template>
-      <p v-else>四类场景 × 两个校区。选择场景查看，或直接提问。</p>
+      <p v-else>四类场景，按当前校区查看。选择场景，或直接提问。</p>
     </template>
     <p v-else>已使用第一阶段规则推荐。重新提问可对照结果。</p>
   </section>
@@ -33,6 +33,15 @@
 <script setup lang="ts">
 import { ref, watch, onBeforeUnmount } from 'vue';
 import type { HeatmapPayload } from './sceneHeatmapTypes';
+import {
+  HEATMAP_LAYER_OPACITY,
+  heatmapRampCss,
+  renderHeatmapCanvas,
+  CHAT_HEATMAP_OPTIONS,
+} from './heatmapRender';
+
+/** 与栅格同源的图例色带（避免图例和实际着色各写一套而漂移）。 */
+const rampCss = heatmapRampCss();
 
 const props = defineProps<{
   map: any;
@@ -55,7 +64,7 @@ const scene = ref('walk');
 const visible = ref(false);
 const loading = ref(false);
 const error = ref('');
-const opacity = ref(0.55);
+const opacity = ref(HEATMAP_LAYER_OPACITY);
 const current = ref<HeatmapPayload | null>(null);
 let layer: any = null;
 let layerMap: any = null;
@@ -92,24 +101,12 @@ const render = () => {
     error.value = '热力网格格式不正确';
     return;
   }
-  const canvas = document.createElement('canvas');
-  canvas.width = grid.width;
-  canvas.height = grid.height;
-  const context = canvas.getContext('2d');
-  if (!context) return;
-  const raster = context.createImageData(grid.width, grid.height);
-  const colors = [[41, 103, 195], [34, 179, 163], [252, 198, 69], [215, 47, 55]];
-  grid.values.forEach((value, index) => {
-    if (value === grid.noData) return;
-    const t = Math.min(1, Math.max(0, value / grid.maxValue));
-    const step = Math.min(2, Math.floor(t * 3));
-    const mix = t * 3 - step;
-    for (let channel = 0; channel < 3; channel++) {
-      raster.data[index * 4 + channel] = Math.round(colors[step][channel] * (1 - mix) + colors[step + 1][channel] * mix);
-    }
-    raster.data[index * 4 + 3] = Math.round(90 + t * 165);
-  });
-  context.putImageData(raster, 0, 0);
+  // 校区淡色背景与真实热点分开显示，关闭深色等值线并柔化边缘。
+  const canvas = renderHeatmapCanvas(grid, CHAT_HEATMAP_OPTIONS);
+  if (!canvas) {
+    error.value = '当前浏览器不支持热力图渲染';
+    return;
+  }
   const AMap = (window as any).AMap;
   try {
     layer = new AMap.ImageLayer({ url: canvas.toDataURL('image/png'), bounds: grid.bounds,
@@ -192,7 +189,8 @@ button.selected { background: #b7081b; color: white; border-color: #b7081b; }
 .scene-row select { flex: 1; min-width: 0; }
 p { margin: 8px 0 0; font-size: 11px; line-height: 1.5; }
 .error { color: #af1827; }
-.legend-bar { margin-top: 12px; height: 9px; border-radius: 4px; background: linear-gradient(90deg,#2967c3,#22b3a3,#fcc645,#d72f37); }
+/* 渐变由 heatmapRampCss() 内联注入，保证与栅格着色同源。 */
+.legend-bar { margin-top: 12px; height: 9px; border-radius: 4px; }
 .legend-labels { display: flex; justify-content: space-between; margin-top: 4px; font-size: 11px; }
 .season-tag { display: inline-block; margin-top: 8px; padding: 3px 10px; border-radius: 999px;
   background: #fdeef0; color: #b7081b; font-size: 12px; font-weight: 600; }

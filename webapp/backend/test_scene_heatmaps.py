@@ -9,8 +9,9 @@ from unittest.mock import patch
 
 import numpy as np
 
+import campus_config
 import scene_heatmaps as hm
-from build_scene_heatmaps import scene_class_weight_map
+from build_scene_heatmaps import load_pois, scene_class_weight_map
 
 BASE = Path(__file__).resolve().parent
 
@@ -41,6 +42,97 @@ class HeatmapMathTests(unittest.TestCase):
         self.assertTrue(np.isfinite(h).all())
         self.assertGreater(h[0], 0)
         self.assertLessEqual(h[0], self.config['maxInfluenceMeters'] / 3)
+
+    def test_knn_bandwidth_keeps_dense_broader_direction(self):
+        """β>0：越密 → 带宽越大（项目既有语义，必须保持）。"""
+        config = dict(self.config, adaptiveBandwidth={
+            'method': 'knn-density', 'neighbourK': 2, 'densityExponent': 1.0})
+        xy = np.array([[0., 0.], [10., 0.], [400., 0.]])
+        h = hm.class_bandwidth(xy, np.array([0., 0.]), config)
+        self.assertEqual(h[0], h[1])
+        self.assertGreaterEqual(h[0], h[2])
+        self.assertTrue(np.isfinite(h).all())
+        self.assertGreater(h.min(), 0)
+        self.assertLessEqual(h.max(), config['maxInfluenceMeters'] / 3)
+
+    def test_negative_exponent_reproduces_textbook_abramson_direction(self):
+        """β<0：越密 → 带宽越小（教科书 Abramson 方向，可复现即可，不作为默认）。"""
+        config = dict(self.config, adaptiveBandwidth={
+            'method': 'knn-density', 'neighbourK': 2, 'densityExponent': -1.0})
+        xy = np.array([[0., 0.], [10., 0.], [400., 0.]])
+        h = hm.class_bandwidth(xy, np.array([0., 0.]), config)
+        self.assertLessEqual(h[0], h[2])
+
+    def test_zero_exponent_degrades_to_fixed_bandwidth(self):
+        """β=0 必须精确退化为固定带宽，用作评测对照。"""
+        config = dict(self.config, adaptiveBandwidth={
+            'method': 'knn-density', 'neighbourK': 2, 'densityExponent': 0.0})
+        xy = np.array([[0., 0.], [10., 0.], [120., 0.], [400., 0.], [900., 40.]])
+        h = hm.class_bandwidth(xy, np.array([0., 0.]), config)
+        self.assertEqual(h.max() - h.min(), 0.0)
+
+    def test_duplicate_points_keep_bandwidth_finite(self):
+        """重复坐标点位会让 k 近邻距离为 0，带宽仍须有限且非零。"""
+        config = dict(self.config, adaptiveBandwidth={
+            'method': 'knn-density', 'neighbourK': 4, 'densityExponent': 1.0})
+        xy = np.array([[5., 5.], [5., 5.], [5., 5.], [300., 0.], [600., 0.]])
+        h = hm.class_bandwidth(xy, np.array([0., 0.]), config)
+        self.assertTrue(np.isfinite(h).all())
+        self.assertTrue((h > 0).all())
+        self.assertLessEqual(h.max(), config['maxInfluenceMeters'] / 3)
+
+    def test_unknown_method_falls_back_to_legacy(self):
+        """配置写错（未知 method / 缺字段）时必须回退旧规则而不是抛异常。"""
+        legacy = dict(self.config, adaptiveBandwidth={'method': 'legacy'})
+        broken = dict(self.config, adaptiveBandwidth={'method': 'no-such-method'})
+        missing = {key: value for key, value in self.config.items() if key != 'adaptiveBandwidth'}
+        xy = np.array([[0., 0.], [10., 0.], [400., 0.]])
+        expected = hm.class_bandwidth(xy, np.array([0., 0.]), legacy)
+        for config in (broken, missing):
+            np.testing.assert_array_equal(hm.class_bandwidth(xy, np.array([0., 0.]), config), expected)
+
+    def test_invalid_adaptive_config_is_rejected(self):
+        """非法自适应配置必须在加载阶段就被拒绝，而不是算出奇怪的带宽。"""
+        raw = json.loads((BASE / 'heatmap_config.json').read_text(encoding='utf-8'))
+        for block in ({'method': 'knn-density', 'neighbourK': 0},
+                      {'method': 'knn-density', 'neighbourK': '4'},
+                      {'method': 'knn-density', 'densityExponent': 99},
+                      {'method': 'unknown-method'},
+                      'not-an-object'):
+            with self.subTest(block=block):
+                with tempfile.TemporaryDirectory() as tmp:
+                    broken = dict(raw, adaptiveBandwidth=block)
+                    Path(tmp, 'heatmap_config.json').write_text(
+                        json.dumps(broken, ensure_ascii=False), encoding='utf-8')
+                    with self.assertRaises(ValueError):
+                        hm.load_config(Path(tmp))
+
+    def test_adaptive_bandwidth_preserves_group_scale(self):
+        """尺度保持：升级只改"组内分布"，组内几何均值必须与旧规则一致。
+
+        这是本轮最重要的不变量——没有人工标注时，"不制造尺度漂移"就是可验证的验收标准。
+        """
+        config = dict(self.config, adaptiveBandwidth={
+            'method': 'knn-density', 'neighbourK': 4, 'densityExponent': 1.0})
+        legacy_config = dict(self.config, adaptiveBandwidth={'method': 'legacy'})
+        generator = np.random.default_rng(20261010)
+        xy = np.vstack([
+            generator.normal(loc=[0, 0], scale=25, size=(40, 2)),
+            generator.normal(loc=[260, 40], scale=90, size=(12, 2)),
+            np.array([[500., 0.], [505., 5.]]),
+        ])
+        legacy = hm.class_bandwidth(xy, np.zeros(2), legacy_config)
+        upgraded = hm.class_bandwidth(xy, np.zeros(2), config)
+        geometric_mean = lambda values: float(np.exp(np.mean(np.log(values))))  # noqa: E731
+        # 容差 5%：伸缩后若较多点被钳到 [minInfluence, maxInfluence] 区间边界，
+        # 几何均值无法完全精确保持；5% 以内的漂移不会改变热力场的整体量级。
+        reference = geometric_mean(legacy)
+        self.assertAlmostEqual(geometric_mean(upgraded), reference, delta=0.05 * reference)
+        self.assertLessEqual(float(upgraded.max()), self.config['maxInfluenceMeters'] / 3)
+        self.assertGreaterEqual(float(upgraded.min()), self.config['minInfluenceMeters'] / 3)
+        # 组内分布确实变得更分散（旧规则的自适应项几乎失效）。
+        self.assertGreater(float(upgraded.max() - upgraded.min()),
+                           float(legacy.max() - legacy.min()))
 
     def test_annd_and_relative_abundance(self):
         xy = np.array([[0., 0.], [10., 0.], [400., 0.]])
@@ -91,6 +183,64 @@ class HeatmapMathTests(unittest.TestCase):
         self.assertTrue(np.isfinite(field).all())
         self.assertEqual(field.max(), 0)
 
+    def test_campus_display_covers_sparse_points_without_faking_scores(self):
+        sparse = copy.deepcopy(self.pois)
+        lng, lat = hm.to_lnglat([0, 700], self.center)
+        sparse.append(dict(sparse[-1], id='remote', lng=lng, lat=lat))
+        geometry = hm.prepare_geometry(sparse, '普陀', self.config)
+        payload = hm.build_map(geometry, 'walk', {'甲': .8})
+        field, _, _ = hm.fuse_fields(geometry, {'甲': .8}, scene='walk')
+        values = np.asarray(payload['grid']['values'])
+        coverage = np.asarray(payload['grid']['coverage'])
+        remote = geometry['mask'] & (geometry['grid'][:, 1] > 600)
+        self.assertTrue(remote.any())
+        self.assertTrue((values[remote] == 0).all())
+        self.assertTrue((coverage[remote] == 1000).all())
+        np.testing.assert_array_equal(values[geometry['mask']], np.rint(field[geometry['mask']] * 1000))
+        self.assertTrue((coverage[~geometry['mask']] == 0).all())
+        self.assertTrue((coverage[geometry['mask']] == 1000).all())
+        hm.validate_payload(payload, '普陀', 'walk')
+        empty = hm.build_map(geometry, 'walk', {})
+        self.assertEqual(empty['places'], [])
+        self.assertFalse(any(empty['grid']['coverage']))
+
+    def test_display_coverage_restores_original_data_footprint(self):
+        first = hm.prepare_geometry(self.pois, '普陀', self.config)
+        config = copy.deepcopy(self.config)
+        config['campuses']['普陀'].pop('displayCoverage')
+        second = hm.prepare_geometry(self.pois, '普陀', config)
+        self.assertEqual(first['bounds'], second['bounds'])
+        np.testing.assert_array_equal(first['mask'], second['mask'])
+        expected = hm.inside_hull(first['grid'], hm.convex_hull(first['xy']))
+        distance = np.linalg.norm(first['grid'][:, None, :] - first['xy'][None, :, :], axis=2)
+        expected &= distance.min(axis=1) <= self.config['supportMeters']
+        np.testing.assert_array_equal(first['mask'], expected)
+        self.assertLess(first['width'], 30)
+        for similarities in ({'甲': .8}, {'乙': .9}):
+            payload = hm.build_map(first, 'walk', similarities)
+            original = hm.build_map(second, 'walk', similarities)
+            np.testing.assert_array_equal(np.asarray(payload['grid']['values']) != -1, expected)
+            self.assertEqual(payload['grid']['values'], original['grid']['values'])
+            self.assertEqual(payload['places'], original['places'])
+
+    def test_preview_without_display_coverage_keeps_poi_supported_geometry(self):
+        config = copy.deepcopy(self.config)
+        config['campuses']['普陀'].pop('displayCoverage')
+        geometry = hm.prepare_geometry(self.pois, '普陀', config)
+        self.assertLess(geometry['width'], 30)
+        payload = hm.build_map(geometry, 'walk', {'甲': .8})
+        self.assertNotIn('coverage', payload['grid'])
+        self.assertEqual(payload['boundarySource'], 'poi_convex_hull_with_support_mask')
+
+    def test_malformed_coverage_is_rejected(self):
+        payload = hm.build_map(hm.prepare_geometry(self.pois, '普陀', self.config), 'walk', {'甲': .8})
+        for coverage in ([0], [float('nan')] * len(payload['grid']['values']),
+                         [1001] * len(payload['grid']['values'])):
+            broken = copy.deepcopy(payload)
+            broken['grid']['coverage'] = coverage
+            with self.assertRaises(ValueError):
+                hm.validate_payload(broken, '普陀', 'walk')
+
     def test_scene_output_is_independent_of_other_scene_results(self):
         geometry = hm.prepare_geometry(self.pois, '普陀', self.config, scene='walk')
         first = hm.build_map(geometry, 'walk', {'甲': .8, '乙': .3})
@@ -129,6 +279,72 @@ class HeatmapMathTests(unittest.TestCase):
         self.assertTrue(any(beta < 0 for beta in betas.values()))
         self.assertTrue(np.isfinite(field).all())
 
+    def test_formal_clip_mode_keeps_original_category_cutoff(self):
+        geometry = hm.prepare_geometry(self.pois, '普陀', self.config, scene='date')
+        field, contributions, betas = hm.fuse_fields(geometry, {'甲': .8, '乙': .3})
+        self.assertTrue(np.isfinite(field).all())
+        self.assertEqual(betas['乙'], 0)
+        self.assertFalse(np.any(contributions['乙'] > 0))
+
+    def test_poi_sources_are_sorted_and_new_campus_changes_fingerprint(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            base = project / 'webapp' / 'backend'
+            data = project / 'data'
+            base.mkdir(parents=True)
+            data.mkdir()
+            for name in ('heatmap_config.json', 'scene_profiles.json'):
+                (base / name).write_text('{}', encoding='utf-8')
+            for name in ('scene_heatmaps.py', 'build_scene_heatmaps.py',
+                         'semantic_retrieval.py'):
+                (base / name).write_text(f'# {name}\n', encoding='utf-8')
+            (data / 'all_templates.json').write_text('[]', encoding='utf-8')
+            (base / 'campus_pois.json').write_text('[{"id":"ecnu"}]', encoding='utf-8')
+            sjtu_path = base / 'sjtu_minhang_pois.json'
+            sjtu_path.write_text('[{"id":"sjtu-1"}]', encoding='utf-8')
+            (base / 'not-a-poi.json').write_text('{}', encoding='utf-8')
+
+            self.assertEqual(
+                [path.name for path in hm.poi_source_paths(base)],
+                ['campus_pois.json', 'sjtu_minhang_pois.json'],
+            )
+            before = hm.fingerprint(base, 'test-model')
+            sjtu_path.write_text('[{"id":"sjtu-2"}]', encoding='utf-8')
+            self.assertNotEqual(before, hm.fingerprint(base, 'test-model'))
+
+    def test_repository_cache_manifest_matches_current_sources(self):
+        manifest = json.loads(
+            (BASE / 'heatmap_cache' / 'manifest.json').read_text(encoding='utf-8'))
+
+        self.assertEqual(manifest['sourceHash'], hm.fingerprint(BASE, manifest['model']))
+        self.assertEqual(manifest['mapCount'], 20)
+        self.assertEqual(manifest['audit']['byCampus'], {
+            '普陀': 1515, '闵行': 1476,
+        })
+        self.assertEqual(manifest.get('skippedHeatmaps'), {})
+
+    def test_load_pois_merges_all_discovered_files_in_order(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            (base / 'z_pois.json').write_text('[{"id":"z"}]', encoding='utf-8')
+            (base / 'a_pois.json').write_text(
+                '[{"id":"a1"},{"id":"a2"}]', encoding='utf-8')
+            (base / 'ignored.json').write_text('[{"id":"ignored"}]', encoding='utf-8')
+
+            self.assertEqual(
+                [poi['id'] for poi in load_pois(base=base)],
+                ['a1', 'a2', 'z'],
+            )
+
+    def test_load_pois_rejects_a_non_list_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            (base / 'good_pois.json').write_text('[]', encoding='utf-8')
+            (base / 'broken_pois.json').write_text('{"id":"not-a-list"}', encoding='utf-8')
+
+            with self.assertRaises(ValueError):
+                load_pois(base=base)
+
     def test_cache_missing_stale_disabled_and_copy(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -136,6 +352,8 @@ class HeatmapMathTests(unittest.TestCase):
             store = hm.HeatmapStore(root)
             with self.assertRaises(hm.HeatmapUnavailable):
                 store.get('普陀', 'walk')
+            with self.assertRaises(ValueError):
+                store.get('交大闵行', 'walk')
             store.cache.mkdir()
             (store.cache / 'manifest.json').write_text('{"sourceHash":"old"}', encoding='utf-8')
             with patch.object(hm, 'fingerprint', return_value='new'):
@@ -159,6 +377,27 @@ class HeatmapMathTests(unittest.TestCase):
             store = hm.HeatmapStore(Path(directory))
             with self.assertRaises(hm.HeatmapUnavailable):
                 store.get('普陀', 'walk')
+
+    def test_cache_reports_manifest_skip_reason(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'heatmap_config.json').write_text(json.dumps(self.config), encoding='utf-8')
+            store = hm.HeatmapStore(root)
+            store.cache.mkdir()
+            reason = '普陀: insufficient spatial coverage'
+            manifest = {
+                'algorithm': hm.ALGORITHM_VERSION,
+                'model': store.model,
+                'sourceHash': 'current',
+                'skippedHeatmaps': {'普陀': {'flower_viewing': reason}},
+            }
+            (store.cache / 'manifest.json').write_text(
+                json.dumps(manifest, ensure_ascii=False), encoding='utf-8')
+
+            with patch.object(hm, 'fingerprint', return_value='current'):
+                with self.assertRaises(hm.HeatmapUnavailable) as raised:
+                    store.get('普陀', 'flower_viewing')
+            self.assertIn(reason, str(raised.exception))
 
     def test_valid_json_with_broken_grid_or_wrong_campus_is_rejected(self):
         payload = hm.build_map(hm.prepare_geometry(self.pois, '普陀', self.config), 'walk', {'甲': .8})
@@ -201,8 +440,8 @@ class HeatmapApiTests(unittest.TestCase):
         return self.client.post('/api/chat', json={
             'messages': [{'role': 'user', 'content': query}], 'userCampus': '普陀', **kwargs})
 
-    def test_new_mode_all_four_scenes_and_both_campuses(self):
-        for campus in ('普陀', '闵行'):
+    def test_new_mode_all_four_scenes_and_configured_campuses(self):
+        for campus in campus_config.qa_campus_names():
             for word, scene in [('赏花','flower_viewing'), ('拍照','photo'), ('散步','walk'), ('约会','date')]:
                 payload = {'scene': scene, 'sceneName': word, 'campus': campus, 'disclaimer': hm.DISCLAIMER,
                            'places': [{'name': '已有点位周边', 'rank': 1, 'reason': '真实点位依据'}]}
@@ -213,6 +452,22 @@ class HeatmapApiTests(unittest.TestCase):
                 self.assertEqual(response.json['locations'], response.json['ranked_places'])
                 get.assert_called_once_with(campus, scene)
         self.post.assert_not_called()
+
+    def test_new_mode_without_scope_uses_configured_default(self):
+        campus = campus_config.default_campus()
+        payload = {
+            'scene': 'walk', 'sceneName': '散步休息', 'campus': campus,
+            'disclaimer': hm.DISCLAIMER,
+            'places': [{'name': '已有点位周边', 'rank': 1, 'reason': '真实点位依据'}],
+        }
+        with patch.object(self.server._HEATMAP_STORE, 'get', return_value=payload) as get:
+            response = self.client.post('/api/chat', json={
+                'messages': [{'role': 'user', 'content': '校园里哪里适合散步'}],
+                'recommendationMode': 'sakde',
+            })
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json.get('recommendation_engine'), 'sakde')
+        get.assert_called_once_with(campus, 'walk')
 
     def test_original_default_never_reads_heatmap(self):
         with patch.object(self.server._HEATMAP_STORE, 'get', side_effect=AssertionError('old path changed')):
@@ -244,8 +499,15 @@ class HeatmapApiTests(unittest.TestCase):
         self.assertEqual(response.json['recommendation_engine'], 'rule')
         self.assertEqual(response.json['heatmap_status'], '缓存不可用')
 
+    def test_removed_chat_campus_falls_back_without_server_error(self):
+        with patch.object(self.server._HEATMAP_STORE, 'get', side_effect=ValueError('校区未启用热图')):
+            response = self.chat('交大闵行校区哪里适合散步', recommendationMode='sakde')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json['heatmap_status'], '校区未启用热图')
+
     def test_http_validation_and_missing_cache(self):
         self.assertEqual(self.client.get('/api/heatmaps?campus=bad&scene=walk').status_code, 400)
+        self.assertEqual(self.client.get('/api/heatmaps?campus=交大闵行&scene=walk').status_code, 400)
         with patch.object(self.server._HEATMAP_STORE, 'get', side_effect=hm.HeatmapUnavailable('未生成')):
             self.assertEqual(self.client.get('/api/heatmaps?campus=普陀&scene=walk').status_code, 503)
 

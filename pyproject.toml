@@ -1,0 +1,43 @@
+# 开发工具统一配置。
+#
+# 这里**故意不声明 [project]**：本仓库是一个「应用 + 工具包」的仓库，不是待发布到 PyPI
+# 的包，声明 [project] 会改变安装语义（例如 pip install -e . 的导入路径）。只保留工具配置。
+
+[tool.ruff]
+# 现有代码以 120 列为界，保持与仓库既有排版一致。
+line-length = 120
+target-version = "py310"
+extend-exclude = [
+    ".venv",
+    "venv",
+    "build",
+    # 历史分析/可视化脚本与数据目录：非应用代码，单独演进，避免全仓一次性改写。
+    "analysis",
+    "visualization",
+    "data",
+    # 前端由 npm/vue-tsc 负责，不走 Python 静态检查。
+    "webapp/frontend",
+]
+
+[tool.ruff.lint]
+# 采用「高信噪比」规则集起步：只查真实缺陷（未定义名、未使用变量、语法级问题），
+# 不引入成百上千条纯风格告警。规则集可以在清理完成后按需扩大（例如加 "I" 做 import 排序）。
+select = ["F", "E9"]
+
+[tool.ruff.lint.per-file-ignores]
+# 测试里允许导入后仅用于副作用/被 patch 的符号。
+"**/test_*.py" = ["F401", "F811"]
+
+[tool.black]
+# black 与 ruff 的 line-length 保持一致，避免两个工具互相"打架"。
+# 注意：本轮不做全仓 reformat（会产生巨大的无关 diff），black 仅作为可选的本地格式化工具；
+# CI 里只跑 ruff check，不跑 black --check。
+line-length = 120
+target-version = ["py310"]
+
+[tool.pytest.ini_options]
+testpaths = ["webapp/backend", "tools/campus_generator"]
+# 让 `import server` / `import campus_config` 与 `tools.campus_generator.*` 在仓库根目录
+# 直接 `python -m pytest` 时都能解析，不必先 cd 到 webapp/backend。
+pythonpath = [".", "webapp/backend"]
+addopts = "-ra"
