@@ -18,8 +18,6 @@ from api.review_guard import review_denied, review_token_ok
 
 bp = Blueprint('userdata_api', __name__)
 
-bp = Blueprint('userdata_api', __name__)
-
 # 只做"收集 + 审核 + 导出"；并入正式 POI 仍走 tools/campus_generator 的离线确认流程。
 
 

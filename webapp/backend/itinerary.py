@@ -13,8 +13,9 @@
 
 from __future__ import annotations
 
-import math
 import re
+
+from geo_utils import distance_meters
 
 # ---------------------------------------------------------------------------
 # 常量
@@ -114,14 +115,8 @@ def is_itinerary_query(query) -> bool:
 
 
 def _distance_meters(lng1: float, lat1: float, lng2: float, lat2: float) -> float:
-    """与 server.py `_distance_meters` 同口径的近似平面距离（米）。
-
-    这里独立实现而不 import server，以保持本模块的纯函数性质与可离线测试性。
-    """
-    mean_lat = math.radians((lat1 + lat2) / 2)
-    dx = (lng1 - lng2) * 111320 * math.cos(mean_lat)
-    dy = (lat1 - lat2) * 110540
-    return (dx * dx + dy * dy) ** 0.5
+    """与其它后端模块同口径的近似平面距离（米）。"""
+    return distance_meters(lng1, lat1, lng2, lat2)
 
 
 def _as_float(value):

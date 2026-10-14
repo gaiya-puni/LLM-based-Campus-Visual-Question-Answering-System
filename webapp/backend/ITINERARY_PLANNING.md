@@ -140,7 +140,7 @@
 | `python -m unittest test_itinerary` | **35/35 通过**（意图判定、三段完整性、中午餐饮、去重、贪心顺序、阈值降级、缺失时段、站点不足回退、文案与契约） |
 | `python -m unittest test_chat_itinerary` | **11/11 通过**（路由优先级、针尖起点归属与跨校区拒绝、模式开关；大模型用桩，离线可跑） |
 | `python -m unittest test_scene_heatmaps` | 22/22 通过（无回归） |
-| `python -m unittest test_security` | 6/6 通过（无回归） |
+| `python -m unittest test_api_auth` | 鉴权、健康检查、情感数据、限流与改密回归测试（原安全测试已合并） |
 | `npx vue-tsc --noEmit` | exit 0，零类型错误 |
 | 浏览器端到端 | 实测「我第一次来普陀校区，帮我规划一天」→ `engine=itinerary`、5 站（上午 2 / 中午 1 / 下午 2）、5 个地图标记、面板 `stops=5 / legs=4 / skip=0`，四条通行标签齐全，对话区显示大模型生成的分段文案 |
 | 接口回归（脚本实测） | 带 `sakde` → 返回 `itinerary`；不带模式 → 无 `itinerary`（常规路径不变，93 个打点）；「我刚来学校，想去图书馆」→ 不再被误判，正常回答图书馆 |

@@ -37,6 +37,8 @@ import unicodedata
 from datetime import datetime
 from pathlib import Path
 
+from geo_utils import distance_meters
+
 logger = logging.getLogger(__name__)
 
 _BASE_DIR = Path(__file__).resolve().parent
@@ -163,10 +165,7 @@ def _now_iso() -> str:
 
 
 def _distance_meters(lng1, lat1, lng2, lat2) -> float:
-    mean_lat = math.radians((lat1 + lat2) / 2)
-    dx = (lng1 - lng2) * 111320 * math.cos(mean_lat)
-    dy = (lat1 - lat2) * 110540
-    return (dx * dx + dy * dy) ** 0.5
+    return distance_meters(lng1, lat1, lng2, lat2)
 
 
 def _as_float(value):

@@ -1,6 +1,6 @@
 """鉴权类路由的直测：健康检查、情感数据、注册 / 登录 / 改密。
 
-拆分前这些端点只被间接覆盖（`test_security.py` 只碰了改密与健康检查各一条）。
+鉴权端点集中在本模块测试，包含从旧安全测试迁移的改密与限流检查。
 本模块补齐入参校验、凭据错误、数据库不可用降级与历史明文口令自动升级等分支。
 
 约定：
@@ -152,9 +152,14 @@ class LoginRouteTests(_AuthRouteTestCase):
 
 class ChangePasswordRouteTests(_AuthRouteTestCase):
     def test_missing_fields_are_rejected(self):
-        response = self.client.post('/api/change_password', json={'username': 'alice'})
-
-        self.assertEqual(response.status_code, 400)
+        cases = (
+            {'username': 'alice'},
+            {'username': 'alice', 'newPassword': 'new-password-123'},
+        )
+        for payload in cases:
+            with self.subTest(payload=payload):
+                response = self.client.post('/api/change_password', json=payload)
+                self.assertEqual(response.status_code, 400)
 
     def test_new_password_is_length_checked(self):
         response = self.client.post('/api/change_password', json={
@@ -179,6 +184,17 @@ class ChangePasswordRouteTests(_AuthRouteTestCase):
 
         self.assertEqual(response.status_code, 400)
 
+    def test_incorrect_current_password_is_rejected_without_writing(self):
+        user = server.User(1, 'alice', server.hash_password('correct-password'))
+        with patch('server.get_user', return_value=user), \
+                patch('server.update_user_password') as update:
+            response = self.client.post('/api/change_password', json={
+                'username': 'alice', 'currentPassword': 'wrong-password',
+                'newPassword': 'new-password-123'})
+
+        self.assertEqual(response.status_code, 401)
+        update.assert_not_called()
+
     def test_successful_change_updates_the_row(self):
         user = server.User(1, 'alice', server.hash_password('correct-password'))
         with patch('server.get_user', return_value=user), \
@@ -189,6 +205,14 @@ class ChangePasswordRouteTests(_AuthRouteTestCase):
 
         self.assertEqual(response.status_code, 200)
         update.assert_called_once_with('alice', 'new-password-123')
+
+
+class RateLimitTests(_AuthRouteTestCase):
+    def test_rate_limit_rejects_excess_requests(self):
+        for _ in range(5):
+            self.client.post('/api/register_json', json={})
+        response = self.client.post('/api/register_json', json={})
+        self.assertEqual(response.status_code, 429)
 
 
 if __name__ == '__main__':

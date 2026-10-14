@@ -5,6 +5,7 @@ import re
 
 import campus_config
 import paths  # noqa: F401
+from geo_utils import distance_meters
 from poi_data import (
     DEFAULT_POI_CATEGORY_CONFIG,
     POI_CATEGORY_CONFIGS,
@@ -380,12 +381,8 @@ def build_college_context(colleges: list) -> str:
 
 
 def _distance_meters(lng1, lat1, lng2, lat2) -> float:
-    """用近似平面距离计算上海范围内两点距离，单位米。"""
-    import math
-    mean_lat = math.radians((lat1 + lat2) / 2)
-    dx = (lng1 - lng2) * 111320 * math.cos(mean_lat)
-    dy = (lat1 - lat2) * 110540
-    return (dx * dx + dy * dy) ** 0.5
+    """用项目统一的近似平面距离计算两点距离，单位米。"""
+    return distance_meters(lng1, lat1, lng2, lat2)
 
 
 NEARBY_PLANT_MAX_DISTANCE_M = 100

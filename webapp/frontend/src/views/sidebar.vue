@@ -61,6 +61,15 @@
 <script setup lang="ts">
 import { ref } from "vue"
 import { useRoute } from "vue-router";
+import {
+    ChatDotRound,
+    DataAnalysis,
+    DocumentChecked,
+    House,
+    MapLocation,
+    Menu,
+    Notebook,
+} from "@element-plus/icons-vue";
 
 const route = useRoute();
 

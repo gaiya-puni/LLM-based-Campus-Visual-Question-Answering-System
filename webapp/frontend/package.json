@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "test:heatmap": "node --test tests/heatmapRender.test.mjs",
+    "test:assets": "node --test tests/frontendAssets.test.mjs",
     "build": "vue-tsc && vite build",
     "preview": "vite preview"
   },
