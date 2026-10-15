@@ -2,11 +2,12 @@
 
 import json
 import os
+import secrets
 from contextlib import contextmanager
 from pathlib import Path
 
 import paths  # noqa: F401
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, session
 from paths import BASE as _BASE
 from runtime import facade
 from flask_app import rate_limit
@@ -20,9 +21,44 @@ from tools.campus_generator.harvest import (AmapPoiHarvester, HarvestCache, Json
 from tools.campus_generator.jobs import JobCapacityError, JobNotReadyError
 from tools.campus_generator.publish import build_publish_plan, publish as _publish_campus_build
 from tools.campus_generator.review import apply_review, load_review
+from tools.campus_generator.selection import save_selection
 from tools.campus_generator.web_search import WebSearchClient  # noqa: F401
 
 bp = Blueprint('campus_build_api', __name__)
+
+
+def _campus_owner_id() -> str:
+    """Return a stable opaque browser-session owner for temporary build jobs."""
+    value = str(session.get('campusBuildOwner') or '').strip()
+    if len(value) < 32:
+        value = secrets.token_urlsafe(32)
+        session['campusBuildOwner'] = value
+    return value
+
+
+def _campus_job_access(job_id: str, *, admin_allowed: bool = False) -> bool:
+    """Keep temporary candidate selections private to their creating session."""
+    getter = getattr(facade._CAMPUS_BUILD_MANAGER, 'get', None)
+    if getter is None:
+        return True
+    record = getter(job_id)
+    if record is None:
+        return True  # Let the route return the usual 404.
+    owner = str(record.get('ownerId') or '').strip()
+    if not owner or owner == _campus_owner_id():
+        return True
+    return bool(admin_allowed and review_token_ok())
+
+
+def _campus_job_exists(job_id: str) -> bool:
+    getter = getattr(facade._CAMPUS_BUILD_MANAGER, 'get', None)
+    if getter is not None:
+        return getter(job_id) is not None
+    return facade._CAMPUS_BUILD_MANAGER.output_path(job_id) is not None
+
+
+def _campus_access_denied():
+    return jsonify({'success': False, 'message': '该临时热力图任务属于其他用户'}), 404
 
 def _campus_build_profile_path(value):
     """Accept only an existing JSON profile under the repository tree."""
@@ -95,6 +131,8 @@ def get_campus_build(job_id):
     record = facade._CAMPUS_BUILD_MANAGER.get(job_id)
     if record is None:
         return jsonify({'success': False, 'message': 'job not found'}), 404
+    if not _campus_job_access(job_id, admin_allowed=True):
+        return _campus_access_denied()
     record.pop('profile', None)
     if record.get('output'):
         record['output'] = job_id
@@ -124,6 +162,8 @@ def _campus_job_operation(job_id, name):
 @bp.route('/api/campus/build/<job_id>/review', methods=['GET'])
 @rate_limit(60)
 def campus_build_review(job_id):
+    if not _campus_job_access(job_id, admin_allowed=True):
+        return _campus_access_denied()
     try:
         with _campus_job_operation(job_id, 'review-read') as output:
             return jsonify({'success': True, 'jobId': job_id, **load_review(output)})
@@ -140,6 +180,8 @@ def campus_build_review(job_id):
 def update_campus_build_review(job_id):
     if not review_token_ok():
         return review_denied()
+    if not _campus_job_access(job_id, admin_allowed=True):
+        return _campus_access_denied()
     data = request.get_json(silent=True) or {}
     try:
         with _campus_job_operation(job_id, 'review-write') as output:
@@ -156,12 +198,37 @@ def update_campus_build_review(job_id):
         return jsonify({'success': False, 'message': str(exc)}), 404
 
 
+@bp.route('/api/campus/build/<job_id>/selection', methods=['POST'])
+@rate_limit(30)
+def update_campus_build_selection(job_id):
+    """Save one user's temporary POI choices without changing formal review data."""
+    data = request.get_json(silent=True) or {}
+    try:
+        if not _campus_job_access(job_id):
+            return _campus_access_denied()
+        with _campus_job_operation(job_id, 'selection-write') as output:
+            normalized = json.loads((output / 'normalized_pois.json').read_text(encoding='utf-8'))
+            result = save_selection(output, data.get('selectedIds'), normalized)
+            invalidate_preview = getattr(facade._CAMPUS_BUILD_MANAGER, 'invalidate_preview', None)
+            if invalidate_preview is not None:
+                invalidate_preview(job_id)
+            return jsonify({'success': True, 'jobId': job_id, 'selection': result})
+    except JobNotReadyError as exc:
+        return jsonify({'success': False, 'message': str(exc)}), 409
+    except (TypeError, ValueError, OSError, json.JSONDecodeError) as exc:
+        return jsonify({'success': False, 'message': str(exc)}), 400
+    except LookupError as exc:
+        return jsonify({'success': False, 'message': str(exc)}), 404
+
+
 @bp.route('/api/campus/build/<job_id>/preview', methods=['POST'])
 @rate_limit(10)
 def submit_campus_build_preview(job_id):
-    if not review_token_ok():
-        return review_denied()
     try:
+        if not _campus_job_exists(job_id) and not review_token_ok():
+            return review_denied()
+        if not _campus_job_access(job_id):
+            return _campus_access_denied()
         facade._CAMPUS_BUILD_MANAGER.submit_preview(job_id)
         return jsonify({'success': True, 'jobId': job_id, 'previewStatus': 'queued'}), 202
     except JobCapacityError as exc:
@@ -179,6 +246,8 @@ def submit_campus_build_preview(job_id):
 def get_campus_build_publish_plan(job_id):
     """Return a diff without changing formal POI assets."""
     try:
+        if not _campus_job_access(job_id, admin_allowed=True):
+            return _campus_access_denied()
         with _campus_job_operation(job_id, 'publish-plan') as output:
             return jsonify({'success': True, 'jobId': job_id,
                             'plan': build_publish_plan(output)})
@@ -196,6 +265,8 @@ def publish_campus_build(job_id):
     """Publish only after the caller explicitly confirms the displayed diff."""
     if not review_token_ok():
         return review_denied()
+    if not _campus_job_access(job_id, admin_allowed=True):
+        return _campus_access_denied()
     data = request.get_json(silent=True) or {}
     try:
         with _campus_job_operation(job_id, 'publish') as output:
@@ -218,6 +289,8 @@ def publish_campus_build(job_id):
 def get_campus_build_preview(job_id, scene):
     if scene not in SCENE_IDS:
         return jsonify({'success': False, 'message': 'scene is invalid'}), 400
+    if not _campus_job_access(job_id, admin_allowed=True):
+        return _campus_access_denied()
     try:
         with _campus_job_operation(job_id, 'preview-read') as output:
             assert_preview_ready = getattr(
@@ -248,8 +321,6 @@ def get_campus_build_preview(job_id, scene):
 @rate_limit(6)
 def submit_campus_discovery():
     """Resolve a natural-language campus request and queue multi-source harvest."""
-    if not review_token_ok():
-        return review_denied()
     data = request.get_json(silent=True) or {}
     capacity_reservation = None
     try:
@@ -326,7 +397,7 @@ def submit_campus_discovery():
                       'targetCategory': plan.targetCategory,
                       'keywords': plan.keywords, 'discoveryWarnings': plan.warnings,
                       'discovery': plan.profile.get('discovery', {}),
-                      'webSearch': plan.webSearch},
+                      'webSearch': plan.webSearch, 'ownerId': _campus_owner_id()},
             reservation=capacity_reservation,
         )
         capacity_reservation = None

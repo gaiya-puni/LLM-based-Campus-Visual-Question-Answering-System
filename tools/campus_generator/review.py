@@ -11,6 +11,7 @@ from .boundary import CampusMembershipEvaluator
 from .formal_asset_io import atomic_write_json
 from .normalize import normalize_candidate
 from .validate import validate_pois
+from .selection import load_selection
 
 
 ALLOWED_PATCH_FIELDS = {
@@ -55,6 +56,10 @@ def load_review(output: str | Path) -> dict:
         )
         items.append(item)
     approved = _read(root / "approved_pois.json", [])
+    selection = load_selection(root, items)
+    selected_ids = set(selection["selectedIds"])
+    for item in items:
+        item["selectedForPreview"] = str(item.get("id")) in selected_ids
     return {
         "campus": (profile.get("campus") or {}).get("name", ""),
         "school": (profile.get("school") or {}).get("name", ""),
@@ -62,6 +67,7 @@ def load_review(output: str | Path) -> dict:
         "candidates": items,
         "pendingInvalid": pending if isinstance(pending, list) else [],
         "approved": approved if isinstance(approved, list) else [],
+        "selection": selection,
         "updatedAt": state.get("updatedAt") if isinstance(state, dict) else None,
     }
 

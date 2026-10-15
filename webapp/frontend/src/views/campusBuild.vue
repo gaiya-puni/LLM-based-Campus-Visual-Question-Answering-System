@@ -35,10 +35,10 @@
           type="password"
           show-password
           autocomplete="off"
-          placeholder="审核令牌（项目根目录 .env 的 USERDATA_REVIEW_TOKEN）"
+          placeholder="管理员令牌（仅正式审核/发布时填写，可留空）"
           @input="saveReviewToken"
         />
-        <span>令牌仅保存在本机浏览器，用于创建、审核、预览和正式发布任务。</span>
+        <span>普通用户无需令牌即可搜索、筛选并生成自己的临时热力图；令牌只用于管理员正式审核和发布。</span>
       </div>
       <div class="resume-row">
         <el-input v-model="jobInput" size="small" placeholder="已有任务 ID，可直接载入" />
@@ -52,7 +52,8 @@
         <div><span>任务</span><code>{{ job.id }}</code></div>
         <div><span>阶段</span>{{ stageLabel(job.stage) }}</div>
         <div><span>候选</span>{{ job.candidateCount ?? 0 }}</div>
-        <div><span>通过</span>{{ review?.approved.length ?? job.approvedCount ?? 0 }}</div>
+        <div><span>已选</span>{{ selectedPreviewIds.length }}</div>
+        <div><span>正式通过</span>{{ review?.approved.length ?? job.approvedCount ?? 0 }}</div>
         <div v-if="job.theme"><span>主题</span>{{ themeLabel(job.theme) }}</div>
         <div v-if="job.webSearch?.requested">
           <span>网页搜索</span>{{ webSearchLabel(job.webSearch.status) }} · {{ job.webSearch.acceptedUrlCount }} 页
@@ -94,13 +95,14 @@
         <div class="panel-head">
           <div>
             <h3>{{ review.school }} · {{ review.campus }}</h3>
-            <p>已登记的植物与场景地点自动保留；这里审核新发现的校园地点。</p>
+            <p>勾选要加入本次热力图的地点；你的选择只保存在当前任务，不会修改全站正式数据。</p>
           </div>
           <el-button size="small" @click="reloadReview" :loading="loadingReview">刷新</el-button>
         </div>
         <div class="review-stats">
           <el-tag type="warning">待审 {{ pendingItems.length }}</el-tag>
-          <el-tag type="success">通过 {{ review.approved.length }}</el-tag>
+          <el-tag type="primary">已选 {{ selectedPreviewIds.length }}</el-tag>
+          <el-tag type="success">正式通过 {{ review.approved.length }}</el-tag>
           <el-tag type="info">无效 {{ review.pendingInvalid.length }}</el-tag>
         </div>
         <div v-if="pendingItems.length" class="batch-review-toolbar">
@@ -108,8 +110,16 @@
             :model-value="allPendingSelected"
             :indeterminate="somePendingSelected"
             @change="toggleAllPending"
-          >全选待审</el-checkbox>
-          <span>已选 {{ batchSelectedIds.length }} 个</span>
+          >全选候选</el-checkbox>
+          <span>已选 {{ selectedPreviewIds.length }} 个</span>
+          <el-button
+            size="small"
+            type="primary"
+            :disabled="selectedPreviewIds.length < 3"
+            :loading="previewing"
+            @click="buildPreview"
+          >生成我的临时热力图</el-button>
+          <template v-if="reviewToken.trim().length >= 16">
           <el-button
             size="small"
             type="primary"
@@ -123,6 +133,7 @@
             :loading="batchReviewing"
             @click="batchDecide('reject')"
           >批量拒绝</el-button>
+          </template>
         </div>
         <div v-if="!reviewQueue.length" class="empty">暂无待审核地点，请检查采集来源或任务警告。</div>
         <article
@@ -135,11 +146,10 @@
           <div class="candidate-title">
             <div class="candidate-name">
               <el-checkbox
-                v-if="item.reviewStatus === 'pending'"
-                :model-value="batchSelectedIds.includes(item.id)"
+                :model-value="selectedPreviewIds.includes(item.id)"
                 :aria-label="`选择 ${item.name}`"
                 @click.stop
-                @change="value => toggleBatchCandidate(item.id, Boolean(value))"
+                @change="value => togglePreviewCandidate(item.id, Boolean(value))"
               />
               <strong>{{ item.name }}</strong>
             </div>
@@ -156,10 +166,10 @@
       <div class="map-panel">
         <div ref="mapEl" class="map"></div>
         <div class="map-toolbar">
-          <el-button size="small" :disabled="previewing || (review.approved.length < 3)" :loading="previewing" type="primary" @click="buildPreview">
+          <el-button size="small" :disabled="previewing || (selectedPreviewIds.length < 3)" :loading="previewing" type="primary" @click="buildPreview">
             {{ previewing ? '构建预览中…' : previewReady ? '重新生成临时热图' : '生成临时热图' }}
           </el-button>
-          <el-button size="small" :disabled="publishing || !review.approved.length" :loading="publishing" @click="showPublishPlan">
+          <el-button v-if="reviewToken.trim().length >= 16" size="small" :disabled="publishing || !review.approved.length" :loading="publishing" @click="showPublishPlan">
             查看正式发布变更
           </el-button>
           <el-select v-model="previewScene" size="small" :disabled="!previewReady" @change="loadPreview">
@@ -174,7 +184,7 @@
           <div class="legend-labels"><span>相对较低</span><span>相对较高</span></div>
           <p class="legend-note">仅在同一校区、同一场景内比较；边界为数据覆盖范围，通行情况未核实。</p>
         </div>
-        <p v-if="!previewReady" class="map-hint">已通过地点 {{ review.approved.length }} 个；新候选通过后即可生成隔离热图预览。</p>
+        <p v-if="!previewReady" class="map-hint">已选择 {{ selectedPreviewIds.length }} 个地点；至少选择 3 个后即可生成你的临时热力图。</p>
         <p v-else class="map-hint preview-success">临时热图已生成，待审核标记已隐藏，可切换场景和季节查看。</p>
         <p v-if="publishPlan" class="publish-hint">正式发布预览：植物新增 {{ publishPlan.plantAdded.length }} / 修改 {{ publishPlan.plantUpdated.length }}，场景新增 {{ publishPlan.sceneAdded.length }} / 修改 {{ publishPlan.sceneUpdated.length }}；发布后需重建索引和热图缓存。</p>
       </div>
@@ -235,7 +245,7 @@
             <div v-if="sourceConfidence(selected) !== undefined"><dt>来源置信度</dt><dd>{{ sourceConfidence(selected)?.toFixed(2) }}</dd></div>
             <div><dt>证据</dt><dd>{{ evidenceText }}</dd></div>
           </dl>
-          <div class="drawer-actions">
+          <div v-if="reviewToken.trim().length >= 16" class="drawer-actions">
             <el-button :loading="reviewing" @click="decide('reject')">拒绝</el-button>
             <el-button :loading="reviewing" @click="decide('pending')">保留待审</el-button>
             <el-button type="primary" :loading="reviewing" @click="decide('approve')">通过</el-button>
@@ -252,7 +262,7 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import { loadAMap } from '../amap';
 import {
   getCampusBuild, getCampusPreview, getCampusReview, submitCampusDiscovery,
-  submitCampusPreview, submitCampusReview, getCampusPublishPlan, publishCampusBuild,
+  submitCampusPreview, submitCampusSelection, submitCampusReview, getCampusPublishPlan, publishCampusBuild,
   type BuildJob, type CandidatePoi, type ReviewBundle, type ReviewStatus, type PublishPlan,
 } from '../api/campusBuild';
 import { getReviewToken, setReviewToken } from '../api/userdata';
@@ -282,6 +292,7 @@ const loadingReview = ref(false);
 const reviewing = ref(false);
 const batchReviewing = ref(false);
 const batchSelectedIds = ref<string[]>([]);
+const selectedPreviewIds = ref<string[]>([]);
 const previewing = ref(false);
 const previewReady = ref(false);
 const previewScene = ref('walk');
@@ -295,10 +306,11 @@ const progress = computed(() => job.value?.status === 'queued' ? 12 : 62);
 const pendingItems = computed(() => review.value?.candidates.filter(item => item.reviewStatus === 'pending') || []);
 const pendingIdSet = computed(() => new Set(pendingItems.value.map(item => item.id)));
 const allPendingSelected = computed(() => (
-  pendingItems.value.length > 0 && pendingItems.value.every(item => batchSelectedIds.value.includes(item.id))
+  (review.value?.candidates.length || 0) > 0
+  && (review.value?.candidates || []).every(item => selectedPreviewIds.value.includes(item.id))
 ));
 const somePendingSelected = computed(() => (
-  batchSelectedIds.value.length > 0 && !allPendingSelected.value
+  selectedPreviewIds.value.length > 0 && !allPendingSelected.value
 ));
 const resolvedDiscovery = computed(() => {
   const discovery = job.value?.discovery;
@@ -323,10 +335,9 @@ const showZeroCandidateHelp = computed(() => (
 ));
 const reviewQueue = computed(() => {
   const items = review.value?.candidates || [];
-  const pending = items.filter(item => item.reviewStatus === 'pending');
-  return selected.value && !pending.some(item => item.id === selected.value?.id)
-    ? [...pending, selected.value]
-    : pending;
+  return selected.value && !items.some(item => item.id === selected.value?.id)
+    ? [...items, selected.value]
+    : items;
 });
 const evidenceText = computed(() => {
   const evidence = selected.value?.evidence;
@@ -388,7 +399,15 @@ const toggleBatchCandidate = (id: string, checked: boolean) => {
   batchSelectedIds.value = [...selectedIds];
 };
 const toggleAllPending = (checked: boolean | string | number) => {
+  const ids = review.value?.candidates.map(item => item.id) || [];
+  selectedPreviewIds.value = checked ? ids : [];
   batchSelectedIds.value = checked ? pendingItems.value.map(item => item.id) : [];
+};
+const togglePreviewCandidate = (id: string, checked: boolean) => {
+  const ids = new Set(selectedPreviewIds.value);
+  if (checked) ids.add(id); else ids.delete(id);
+  selectedPreviewIds.value = [...ids];
+  batchSelectedIds.value = pendingItems.value.filter(item => ids.has(item.id)).map(item => item.id);
 };
 const scoreLabel = (key: string) => ({
   campusEvidence: '校园证据',
@@ -435,6 +454,15 @@ const initMap = async () => {
   } catch (err) { error.value = err instanceof Error ? err.message : '地图加载失败'; }
 };
 
+// 热力图任务切换时，旧的 review 区域会被 Vue 卸载并重新创建。
+// 先销毁旧 AMap 实例，否则 initMap 会误以为地图已存在，导致新容器保持空白。
+const disposeMap = () => {
+  clearMarkers();
+  clearHeatmap();
+  try { map?.destroy?.(); } catch { /* 地图实例已被 DOM 卸载时忽略销毁异常 */ }
+  map = null;
+};
+
 const selectCandidate = (item: CandidatePoi) => {
   selected.value = item;
   edit.name = item.name; edit.locationName = item.locationName; edit.lng = item.lng; edit.lat = item.lat;
@@ -446,6 +474,11 @@ const loadReview = async () => {
   loadingReview.value = true;
   try {
     review.value = await getCampusReview(job.value.id);
+    selectedPreviewIds.value = review.value.selection?.selectedIds
+      || review.value.candidates.filter(item => item.selectedForPreview).map(item => item.id);
+    batchSelectedIds.value = review.value.candidates
+      .filter(item => item.reviewStatus === 'pending' && selectedPreviewIds.value.includes(item.id))
+      .map(item => item.id);
     await nextTick();
     await initMap();
     if (review.value.profile?.campus?.center) map?.setCenter(review.value.profile.campus.center);
@@ -466,12 +499,9 @@ const poll = async () => {
 };
 const startPolling = () => { if (timer) window.clearInterval(timer); timer = window.setInterval(poll, 1800); poll(); };
 const submit = async () => {
-  if (reviewToken.value.trim().length < 16) {
-    error.value = '请先填写至少 16 位审核令牌；它应与项目根目录 .env 中的 USERDATA_REVIEW_TOKEN 一致';
-    return;
-  }
-  saveReviewToken();
-  submitting.value = true; error.value = ''; review.value = null; previewReady.value = false;
+  disposeMap();
+  submitting.value = true; error.value = ''; review.value = null; selectedPreviewIds.value = [];
+  batchSelectedIds.value = []; previewReady.value = false;
   try {
     const result = await submitCampusDiscovery({
       query: query.value.trim(),
@@ -497,7 +527,8 @@ const submit = async () => {
   finally { submitting.value = false; }
 };
 const loadExisting = async () => {
-  error.value = ''; job.value = null; review.value = null; previewReady.value = false; clearHeatmap();
+  disposeMap();
+  error.value = ''; job.value = null; review.value = null; previewReady.value = false;
   try {
     job.value = await getCampusBuild(jobInput.value.trim());
     previewScene.value = ({ walk: 'walk', date: 'date', photo: 'photo', flower: 'flower_viewing' } as Record<string, string>)[job.value.theme || ''] || 'walk';
@@ -598,6 +629,7 @@ const buildPreview = async () => {
   if (!job.value) return;
   previewing.value = true; previewReady.value = false; error.value = ''; clearHeatmap();
   try {
+    await submitCampusSelection(job.value.id, selectedPreviewIds.value);
     await submitCampusPreview(job.value.id);
     let completed = false;
     for (let i = 0; i < 120; i += 1) {
@@ -642,7 +674,7 @@ watch(pendingItems, items => {
   const ids = new Set(items.map(item => item.id));
   batchSelectedIds.value = batchSelectedIds.value.filter(id => ids.has(id));
 });
-onBeforeUnmount(() => { if (timer) window.clearInterval(timer); clearMarkers(); clearHeatmap(); map?.destroy?.(); });
+onBeforeUnmount(() => { if (timer) window.clearInterval(timer); disposeMap(); });
 </script>
 
 <style scoped>

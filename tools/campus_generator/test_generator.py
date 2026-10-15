@@ -30,6 +30,7 @@ from tools.campus_generator.publish import build_publish_plan
 from tools.campus_generator import publish as publish_module
 from tools.campus_generator.preview import _write_preview_pois, build_preview
 from tools.campus_generator.review import apply_review, load_review
+from tools.campus_generator.selection import load_selection, save_selection
 from tools.campus_generator.normalize import normalize_candidates
 from tools.campus_generator.profile import runtime_config, validate_profile
 from tools.campus_generator.quality import assess_candidate_quality
@@ -71,6 +72,23 @@ BOUNDARY_PROFILE = {
 
 
 class GeneratorTests(unittest.TestCase):
+    def test_user_selection_is_isolated_from_formal_approved_pois(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            candidate = {
+                "id": "p1", "name": "校园湖", "locationName": "校园湖",
+                "lng": 121.0, "lat": 31.0, "campus": "示例校区",
+                "category": "scene", "subCategory": "湖泊",
+            }
+            (root / "normalized_pois.json").write_text(
+                json.dumps([candidate], ensure_ascii=False), encoding="utf-8",
+            )
+            (root / "approved_pois.json").write_text("[]", encoding="utf-8")
+            result = save_selection(root, ["p1"], [candidate])
+            self.assertEqual(result["selectedIds"], ["p1"])
+            self.assertEqual(json.loads((root / "approved_pois.json").read_text()), [])
+            self.assertEqual(load_selection(root, [candidate])["selectedIds"], ["p1"])
+
     def test_profile_and_runtime_config(self):
         self.assertEqual(validate_profile(PROFILE), [])
         runtime = runtime_config(PROFILE)

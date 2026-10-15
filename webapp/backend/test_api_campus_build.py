@@ -101,12 +101,10 @@ class JobLookupTests(_BuildRouteTestCase):
 
 
 class MutationTokenTests(_BuildRouteTestCase):
-    def test_write_endpoints_require_the_review_token(self):
+    def test_admin_write_endpoints_require_the_review_token(self):
         requests = (
             ('post', f'/api/campus/build/{VALID_JOB_ID}/review', {'decisions': {}}),
-            ('post', f'/api/campus/build/{VALID_JOB_ID}/preview', {}),
             ('post', f'/api/campus/build/{VALID_JOB_ID}/publish', {}),
-            ('post', '/api/campus/discover', {'query': '帮我做闵行校区拍照热力图'}),
         )
         with patch.dict(os.environ, {'USERDATA_REVIEW_TOKEN': ''}):
             for method, url, payload in requests:
@@ -114,6 +112,15 @@ class MutationTokenTests(_BuildRouteTestCase):
                     response = getattr(self.client, method)(url, json=payload)
                     self.assertEqual(response.status_code, 403)
                     self.assertIn('USERDATA_REVIEW_TOKEN', response.get_json()['message'])
+
+    def test_public_discovery_does_not_require_admin_token(self):
+        with patch.dict(os.environ, {'USERDATA_REVIEW_TOKEN': ''}):
+            response = self.client.post(
+                '/api/campus/discover',
+                json={'query': '帮我做闵行校区拍照热力图', 'includeAmap': False,
+                      'includeWeb': False},
+            )
+        self.assertNotEqual(response.status_code, 403)
 
     def test_publish_plan_is_intentionally_a_read_without_a_token(self):
         """publish-plan 只回差异、不改正式 POI，且需要 32 位随机 jobId 才能问到，

@@ -46,7 +46,7 @@ class BuildJobManager:
     READ_ONLY_OPERATIONS = frozenset({"review-read", "publish-plan", "preview-read"})
     METADATA_FIELDS = frozenset({
         "query", "theme", "targetCategory", "keywords", "discovery",
-        "discoveryWarnings", "webSearch", "warnings",
+        "discoveryWarnings", "webSearch", "warnings", "ownerId",
     })
     LEGACY_BUNDLE_FILES = {
         "campus_profile.json": dict,

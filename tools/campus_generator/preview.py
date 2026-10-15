@@ -12,6 +12,7 @@ from pathlib import Path
 from .boundary import covering_radius_m
 from .profile import write_json
 from .validate import validate_pois
+from .selection import load_selection
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -78,6 +79,17 @@ def build_preview(output: str | Path) -> dict:
     approved = _read(root / "approved_pois.json")
     approved = [item for item in approved if isinstance(item, dict) and
                 item.get("category") in {"plant", "scene"}]
+    # Public previews use the caller's isolated selection when present.  The
+    # formal approved bundle remains the backwards-compatible fallback for
+    # older jobs and administrator publication previews.
+    selection_path = root / "preview_selection.json"
+    if selection_path.is_file():
+        normalized = _read(root / "normalized_pois.json")
+        candidates = [item for item in normalized if isinstance(item, dict)]
+        by_id = {str(item.get("id")): item for item in approved + candidates
+                 if item.get("id")}
+        selected_ids = load_selection(root, candidates)["selectedIds"]
+        approved = [by_id[item_id] for item_id in selected_ids if item_id in by_id]
     if len(approved) < 3:
         raise ValueError("at least 3 approved POIs are required for a heatmap preview")
     campus = profile.get("campus") or {}

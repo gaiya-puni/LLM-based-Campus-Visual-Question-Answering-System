@@ -52,6 +52,7 @@ export interface CandidatePoi {
   text?: string;
   evidence?: Record<string, unknown>;
   reviewStatus: ReviewStatus;
+  selectedForPreview?: boolean;
 }
 
 export interface BuildJob {
@@ -87,6 +88,7 @@ export interface ReviewBundle {
   candidates: CandidatePoi[];
   pendingInvalid: Array<{ candidate?: Record<string, unknown>; reason?: string }>;
   approved: CandidatePoi[];
+  selection?: { selectedIds: string[]; updatedAt?: string | null };
   validationProblems?: string[];
 }
 
@@ -142,10 +144,7 @@ export function submitCampusDiscovery(payload: {
 }> {
   return fetch('/api/campus/discover', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Review-Token': getReviewToken(),
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   }).then(response => readJson(response, '/api/campus/discover'));
 }
@@ -178,8 +177,17 @@ export function submitCampusReview(jobId: string, decisions: Array<{
 export function submitCampusPreview(jobId: string): Promise<BuildJob> {
   return fetch(`/api/campus/build/${encodeURIComponent(jobId)}/preview`, {
     method: 'POST',
-    headers: { 'X-Review-Token': getReviewToken() },
   }).then(response => readJson<BuildJob>(response, '/api/campus/preview'));
+}
+
+export function submitCampusSelection(jobId: string, selectedIds: string[]): Promise<{
+  success: boolean; jobId: string; selection: { selectedIds: string[]; updatedAt?: string | null };
+}> {
+  return fetch(`/api/campus/build/${encodeURIComponent(jobId)}/selection`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ selectedIds }),
+  }).then(response => readJson(response, '/api/campus/selection'));
 }
 
 export function getCampusPreview(jobId: string, scene: string, season?: string): Promise<PreviewResponse> {
