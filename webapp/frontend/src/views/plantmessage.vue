@@ -33,4 +33,16 @@ import wordCloud from './wordcloud.vue'
     width: 420px;
     min-width: 0;
 }
+
+/* 移动端：单列堆叠 */
+@media (max-width: 768px) {
+    .plant-message-page {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 12px;
+    }
+
+    .emotionMessage {
+        width: 100%;
+    }
+}
 </style>

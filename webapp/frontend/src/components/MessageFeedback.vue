@@ -8,6 +8,7 @@
         :disabled="submitting"
         :aria-pressed="current === 'up'"
         :title="current === 'up' ? '再点一次可撤回这条评价' : '这条回答有用'"
+        :aria-label="current === 'up' ? '这条回答有用，再点一次可撤回这条评价' : '这条回答有用'"
         @click="pick('up')"
       >
         <svg class="rating-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
@@ -24,6 +25,7 @@
         :disabled="submitting"
         :aria-pressed="current === 'down'"
         :title="current === 'down' ? '再点一次可撤回这条评价' : '这条回答没用'"
+        :aria-label="current === 'down' ? '这条回答没用，再点一次可撤回这条评价' : '这条回答没用'"
         @click="pick('down')"
       >
         <svg class="rating-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
@@ -37,6 +39,9 @@
         <span v-if="receivedTip" class="received-tip" role="status" aria-live="polite">已收到，谢谢反馈</span>
       </transition>
     </div>
+
+    <!-- 移动端没有悬停：把原本只写在 title 里的"再点一次可撤回"改为可见提示（桌面端隐藏） -->
+    <p v-if="current" class="touch-hint">已评价，再点一次同一个按钮可撤回</p>
 
     <transition name="expand">
       <div v-if="reasonOpen" class="reason-area">
@@ -281,6 +286,40 @@ const cancelReason = () => {
   margin: 0;
   color: #f56c6c;
   font-size: 12px;
+}
+
+/* 撤回提示仅移动端可见（桌面端靠 title 悬停即可，保持原有观感） */
+.touch-hint {
+  display: none;
+  margin: 0;
+  color: #909399;
+  font-size: 12px;
+}
+
+/* 移动端：触控热区不小于 44x44，输入字号不小于 16px（否则 iOS Safari 聚焦会放大页面） */
+@media (max-width: 768px) {
+  .rating-btn {
+    justify-content: center;
+    min-width: 84px;
+    min-height: 44px;
+    padding: 0 14px;
+    font-size: 13px;
+
+    .rating-icon { width: 16px; height: 16px; }
+  }
+
+  .touch-hint { display: block; }
+
+  .reason-area { max-width: 100%; }
+
+  .reason-input { font-size: 16px; }
+
+  .ghost-btn,
+  .primary-btn {
+    min-height: 40px;
+    padding: 0 16px;
+    font-size: 13px;
+  }
 }
 
 .fade-enter-active,

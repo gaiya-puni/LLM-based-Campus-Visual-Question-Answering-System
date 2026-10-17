@@ -197,4 +197,20 @@ p { margin: 8px 0 0; font-size: 11px; line-height: 1.5; }
 .opacity-label { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
 .opacity-label input { width: 160px; accent-color: #b7081b; }
 @media (max-width: 900px) { .heatmap-panel { width: 240px; left: 8px; } }
+/* 移动端：面板改为底部抽屉，避免大面积遮挡地图 */
+@media (max-width: 768px) {
+  .heatmap-panel {
+    left: 8px;
+    right: 8px;
+    width: auto;
+    top: auto;
+    bottom: 12px;
+    max-height: 45vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    border-radius: 14px;
+    box-shadow: 0 -3px 16px rgba(0, 0, 0, 0.18);
+  }
+  .heatmap-panel button { min-height: 36px; }
+}
 </style>

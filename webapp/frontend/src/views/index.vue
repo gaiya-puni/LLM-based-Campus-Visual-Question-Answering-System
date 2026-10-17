@@ -1,7 +1,7 @@
 <template>
     <div>
-        <!-- 图片轮播 -->
-        <el-carousel :interval="4000" height="400px" type="card">
+        <!-- 图片轮播（移动端取消 card 模式并降高，避免小屏裁切） -->
+        <el-carousel :interval="4000" :height="isMobile ? '220px' : '400px'" :type="isMobile ? undefined : 'card'">
             <el-carousel-item v-for="item in images" :key="item.url">
                 <!-- 使用v-bind绑定不同的图片地址 -->
                 <img :src="item.url" style="width: 100%; height: 100%;" />
@@ -27,6 +27,9 @@
 
 <script setup lang="ts">
 import { ref } from "vue";
+import { useIsMobile } from "../composables/useIsMobile";
+
+const isMobile = useIsMobile();
 
 import image1 from "../assets/carousel1.jpg";
 import image2 from "../assets/carousel2.jpg";
@@ -74,5 +77,20 @@ const images = ref([
 .el-carousel {
     max-width: 100%;
     margin: 0 auto;
+}
+
+/* 移动端：介绍卡片内边距收紧 */
+@media (max-width: 768px) {
+    .intro-card {
+        margin-top: 12px;
+    }
+
+    .intro-card h3 {
+        font-size: 1.2rem;
+    }
+
+    .intro-card p {
+        font-size: 0.9rem;
+    }
 }
 </style>

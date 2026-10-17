@@ -189,4 +189,19 @@ h2 { margin: 0; font-size: 14px; font-weight: 600; color: #2b2b2b; line-height: 
   .card, .badge { transition: none; }
 }
 @media (max-width: 900px) { .itinerary-panel { width: 240px; left: 8px; } }
+/* 移动端：面板改为底部抽屉，避免大面积遮挡地图 */
+@media (max-width: 768px) {
+  .itinerary-panel {
+    left: 8px;
+    right: 8px;
+    width: auto;
+    top: auto;
+    bottom: 12px;
+    max-height: 45vh;
+    border-radius: 14px;
+    box-shadow: 0 -3px 16px rgba(0, 0, 0, 0.18);
+  }
+  .itinerary-panel .badge { width: 28px; height: 28px; }
+  .itinerary-panel .collapse { min-height: 32px; padding: 4px 12px; }
+}
 </style>

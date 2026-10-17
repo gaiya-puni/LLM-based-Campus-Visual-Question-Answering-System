@@ -1,4 +1,6 @@
 import { createRouter, createWebHashHistory} from "vue-router";
+import { ElMessage } from "element-plus";
+import { ensureReviewAccess } from "../composables/useReviewAccess";
 const routes = [
   {
     path: "/",
@@ -74,6 +76,38 @@ const routes = [
     },
     component: () => import("../views/campusBuild.vue"),
   },
+  {
+    path: "/comment-review",
+    name: "commentReview",
+    meta: {
+      title: "评论审核",
+      // 只有后端配好 USERDATA_REVIEW_TOKEN 时才允许进入；未配置直接回首页
+      requiresReview: true,
+    },
+    component: () => import("../views/commentReview.vue"),
+  },
 ];
 const router = createRouter({ history: createWebHashHistory(), routes });
+
+/**
+ * 审核页守卫：`/comment-review` 只在后端已启用审核态时可进入。
+ *
+ * 拦住的是"误闯"：`.env` 没配密钥时该页所有接口都是 403，进去了也只能看到
+ * 一张空表和密钥输入框，容易让人以为功能坏了。密钥校验本身仍在后端。
+ * 探测失败（`null`）不拦——旧后端没有该接口时不能把页面变成死链。
+ */
+router.beforeEach(async (to) => {
+  if (to.meta?.requiresReview !== true) return true;
+  const enabled = await ensureReviewAccess();
+  if (enabled === false) {
+    ElMessage({
+      message: '「评论审核」未开启：请在根目录 .env 配置 USERDATA_REVIEW_TOKEN（至少 16 位）后重启后端',
+      type: 'warning',
+      duration: 4500,
+    });
+    return { path: '/index' };
+  }
+  return true;
+});
+
 export default router;

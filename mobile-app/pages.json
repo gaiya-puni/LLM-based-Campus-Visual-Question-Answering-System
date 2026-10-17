@@ -1,0 +1,20 @@
+{
+  "pages": [
+    {
+      "path": "pages/index/index",
+      "style": {
+        "navigationBarTitleText": "校园可视可答",
+        "navigationStyle": "custom",
+        "app-plus": {
+          "bounce": "none"
+        }
+      }
+    }
+  ],
+  "globalStyle": {
+    "navigationBarTextStyle": "white",
+    "navigationBarTitleText": "校园可视可答",
+    "navigationBarBackgroundColor": "#c20a1c",
+    "backgroundColor": "#ffffff"
+  }
+}

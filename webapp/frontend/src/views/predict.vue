@@ -229,4 +229,27 @@ const handlePredictClick = () => {
     max-height: 100px; /* 根据需要调整大小 */
 }
 
+/* 移动端：表单控件通栏、弹窗全宽、结果卡片单列 */
+@media (max-width: 768px) {
+    .el-select,
+    .el-input {
+        width: 100%;
+    }
+
+    /* 弹窗宽度已统一由全局 style.css 的 .el-dialog 规则控制：
+       el-dialog 会 teleport 到 body，渲染后的 .el-dialog 不带本组件的 scopeId，
+       这里写 :deep(.el-dialog) 不会生效（已实测）。 */
+
+    .el-col-6 {
+        flex: 0 0 100%;
+        max-width: 100%;
+    }
+
+    .el-card {
+        width: auto;
+        height: auto;
+        max-height: 60vh;
+    }
+}
+
 </style>

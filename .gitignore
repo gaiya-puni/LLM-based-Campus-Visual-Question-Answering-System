@@ -34,6 +34,9 @@ webapp/frontend/dist/
 webapp/frontend/dist-ssr/
 webapp/frontend/*.local
 
+# 移动端巡检产物：各视口逐页截图 + report.json，属本机测试产物不入库
+webapp/frontend/tests/mobile-snapshots/
+
 # OS
 .DS_Store
 Thumbs.db

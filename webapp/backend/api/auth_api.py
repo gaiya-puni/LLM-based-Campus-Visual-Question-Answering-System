@@ -2,10 +2,11 @@
 
 import paths  # noqa: F401
 from flask import Blueprint, jsonify, request
-from flask_login import login_user
+from flask_login import current_user, login_user
 from runtime import facade
 from flask_app import rate_limit
 from auth_db import is_password_hash, verify_password
+from api.review_guard import review_configured
 
 bp = Blueprint('auth_api', __name__)
 
@@ -32,6 +33,56 @@ def health():
 @rate_limit(60)
 def emotions():
     return jsonify(facade._EMOTIONS)
+
+
+@bp.route("/api/session", methods=["GET"])
+@rate_limit(120)
+def session_state():
+    """当前登录态。
+
+    会话 Cookie 是 HttpOnly 的，前端读不到，因此需要一个显式接口告诉它
+    "现在是不是登录了、登录的是谁"——评论区的"未登录只能看"引导依赖这个字段。
+    """
+    try:
+        authenticated = bool(current_user and current_user.is_authenticated)
+        username = str(current_user.username) if authenticated else ''
+    except Exception:
+        authenticated, username = False, ''
+    return jsonify({'success': True, 'loggedIn': authenticated, 'username': username})
+
+
+@bp.route("/api/review-status", methods=["GET"])
+@rate_limit(120)
+def review_status():
+    """审核态是否已开启（只回布尔值，绝不回密钥本身）。
+
+    前端用它决定「评论审核」入口显不显示：`.env` 没配 `USERDATA_REVIEW_TOKEN`
+    时该页对所有接口都是 403，入口留着只会误导人。真正的门禁仍是
+    请求头 `X-Review-Token`，这里只负责"看得见 / 看不见"这一层体验。
+    """
+    return jsonify({'success': True, 'configured': review_configured()})
+
+
+@bp.route("/api/emotion-plants", methods=["GET"])
+@rate_limit(60)
+def emotion_plants():
+    """寄语 id → 对应植物的精简信息（植物名 / 科属 / 图标 / 位置 / 院系）。
+
+    单独成接口而不是塞进 /api/emotions：后者被测试与 build_emotion_context 当作
+    纯留言数据使用，返回值契约不宜改变。
+    """
+    return jsonify(facade._EMOTION_PLANTS)
+
+
+@bp.route("/api/plant-stats", methods=["GET"])
+@rate_limit(60)
+def plant_stats():
+    """校园植物总览：{species: 植物种类数, trees: 已登记树木数}。
+
+    与 emotion_plants 分开：那个接口的返回值是按寄语 id 索引的映射，
+    往里塞总数会破坏其契约。
+    """
+    return jsonify(facade._PLANT_STATS)
 
 
 @bp.route("/api/register_json", methods=["POST"])

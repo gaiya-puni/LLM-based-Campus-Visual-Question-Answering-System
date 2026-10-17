@@ -7,6 +7,8 @@ export {}
 
 declare module 'vue' {
   export interface GlobalComponents {
+    CommentReportDialog: typeof import('./components/CommentReportDialog.vue')['default']
+    DevicePreviewFrame: typeof import('./components/DevicePreviewFrame.vue')['default']
     Echarts: typeof import('./components/Echarts.vue')['default']
     ElAside: typeof import('element-plus/es')['ElAside']
     ElButton: typeof import('element-plus/es')['ElButton']
@@ -43,9 +45,11 @@ declare module 'vue' {
     MessageFeedback: typeof import('./components/MessageFeedback.vue')['default']
     PlaceReportDialog: typeof import('./components/PlaceReportDialog.vue')['default']
     PlaceReviewDrawer: typeof import('./components/PlaceReviewDrawer.vue')['default']
+    PoiCommentPanel: typeof import('./components/PoiCommentPanel.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     SceneHeatmapPanel: typeof import('./components/SceneHeatmapPanel.vue')['default']
+    ViewModeSwitch: typeof import('./components/ViewModeSwitch.vue')['default']
   }
   export interface ComponentCustomProperties {
     vLoading: typeof import('element-plus/es')['ElLoadingDirective']

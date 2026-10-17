@@ -19,6 +19,7 @@ import requests
 
 from .harvest import (AmapPoiHarvester, HarvestCache, Harvester, HarvestResult,
                        PublicWebHarvester)
+from .outbound import direct_proxies
 from .profile import validate_profile
 from .web_search import WebSearchClient
 
@@ -453,16 +454,25 @@ class CampusProfileResolver:
                 "https://restapi.amap.com/v3/geocode/geo",
                 params=params,
                 timeout=10,
+                # restapi.amap.com is a domestic endpoint: the system proxy
+                # registered by Clash-like tools makes every request fail with
+                # ProxyError.  Same policy as the POI harvester; AMAP_HTTP_PROXY
+                # overrides it for networks that really need a proxy.
+                proxies=direct_proxies(),
             )
             response.raise_for_status()
         except requests.HTTPError as exc:
             status = getattr(getattr(exc, "response", None), "status_code", None)
             detail = status if status is not None else "unknown"
             # Do not propagate requests' exception text: it commonly embeds
-            # the complete request URL, including the Web service key.
+            # the complete request URL, including the Web service key.  The
+            # exception class alone is safe and is what actually locates the
+            # fault (ProxyError / ConnectTimeout / SSLError).
             raise RuntimeError(f"AMap geocoding request failed (HTTP {detail})") from None
-        except requests.RequestException:
-            raise RuntimeError("AMap geocoding request failed (network error)") from None
+        except requests.RequestException as exc:
+            raise RuntimeError(
+                f"AMap geocoding request failed (network error: {type(exc).__name__})"
+            ) from None
         try:
             data = response.json()
         except (TypeError, ValueError):

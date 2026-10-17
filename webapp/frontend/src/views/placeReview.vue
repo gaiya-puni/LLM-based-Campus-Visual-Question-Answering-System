@@ -500,4 +500,51 @@ onUnmounted(() => {
   color: #c0c4cc;
   font-size: 12px;
 }
+
+/* 移动端：页头纵向排列、操作按钮换行铺满，统计卡单列、筛选控件通栏 */
+@media (max-width: 768px) {
+  .review-page {
+    padding: 14px 12px 24px;
+    border-radius: 0;
+  }
+
+  .page-head {
+    flex-direction: column;
+    gap: 10px;
+
+    .head-text p { max-width: none; }
+
+    .head-actions {
+      flex-wrap: wrap;
+      margin-left: 0;
+      width: 100%;
+
+      button {
+        flex: 1 1 auto;
+        min-height: 40px;
+      }
+    }
+  }
+
+  .token-gate .gate-row {
+    flex-direction: column;
+  }
+
+  .stat-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .filter-row {
+    flex-wrap: wrap;
+
+    .filter-select,
+    .search-input {
+      width: 100%;
+    }
+
+    .filter-total { margin-left: 0; }
+  }
+
+  .pager { justify-content: center; }
+}
 </style>

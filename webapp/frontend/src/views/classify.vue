@@ -77,4 +77,19 @@ const radio1 = ref('植物类型');
     color: #555555;
     line-height: 1.5;
 }
+
+/* 移动端：卡片通栏，宽图表（桑基图/平行坐标）靠容器横向滑动查看 */
+@media (max-width: 768px) {
+    .box-card {
+        width: 100%;
+    }
+
+    .box-card h3 {
+        font-size: 1.15rem;
+    }
+
+    .box-card p {
+        font-size: 0.9rem;
+    }
+}
 </style>

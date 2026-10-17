@@ -68,4 +68,19 @@ const selectWord = (word: typeof words[number]) => {
     outline: 2px solid #c20a1c;
     outline-offset: 3px;
 }
+
+/* 移动端：高度交给内容决定，避免固定高度 + overflow:hidden 裁掉上下两行词 */
+@media (max-width: 768px) {
+    .word-cloud-wrap {
+        height: auto;
+        padding: 12px 8px;
+    }
+
+    .word-cloud-chart {
+        height: auto;
+        overflow: visible;
+        align-content: flex-start;
+        gap: 8px 12px;
+    }
+}
 </style>

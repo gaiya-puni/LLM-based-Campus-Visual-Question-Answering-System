@@ -13,11 +13,20 @@ from flask import jsonify, request
 REVIEW_TOKEN_MIN_LENGTH = 16
 
 
+def review_configured() -> bool:
+    """本机是否已启用审核态（`.env` 配了足够长的 `USERDATA_REVIEW_TOKEN`）。
+
+    只回答"有没有开"，不参与任何校验：前端据此决定是否显示「评论审核」入口。
+    配置口径与 `review_token_ok()` 共用同一处判断，避免两边各写一份长度规则。
+    """
+    return len((os.getenv('USERDATA_REVIEW_TOKEN') or '').strip()) >= REVIEW_TOKEN_MIN_LENGTH
+
+
 def review_token_ok() -> bool:
     """请求头 `X-Review-Token` 必须等于 .env 的 `USERDATA_REVIEW_TOKEN`。"""
-    expected = (os.getenv('USERDATA_REVIEW_TOKEN') or '').strip()
-    if len(expected) < REVIEW_TOKEN_MIN_LENGTH:
+    if not review_configured():
         return False
+    expected = (os.getenv('USERDATA_REVIEW_TOKEN') or '').strip()
     provided = (request.headers.get('X-Review-Token') or '').strip()
     return hmac.compare_digest(provided, expected)
 

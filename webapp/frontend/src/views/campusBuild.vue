@@ -189,7 +189,7 @@
         <p v-if="publishPlan" class="publish-hint">正式发布预览：植物新增 {{ publishPlan.plantAdded.length }} / 修改 {{ publishPlan.plantUpdated.length }}，场景新增 {{ publishPlan.sceneAdded.length }} / 修改 {{ publishPlan.sceneUpdated.length }}；发布后需重建索引和热图缓存。</p>
       </div>
 
-      <el-drawer v-model="drawerVisible" title="候选地点审核" size="380px">
+      <el-drawer v-model="drawerVisible" title="候选地点审核" :size="drawerSize">
         <template v-if="selected">
           <el-form label-position="top">
             <el-form-item label="地点名称"><el-input v-model="edit.name" /></el-form-item>
@@ -260,6 +260,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { loadAMap } from '../amap';
+import { useIsMobile } from '../composables/useIsMobile';
 import {
   getCampusBuild, getCampusPreview, getCampusReview, submitCampusDiscovery,
   submitCampusPreview, submitCampusSelection, submitCampusReview, getCampusPublishPlan, publishCampusBuild,
@@ -275,6 +276,8 @@ import {
 
 /** 与栅格同源的图例色带（此前这个页面没有任何图例，颜色含义无从得知）。 */
 const rampCss = heatmapRampCss();
+
+const isMobile = useIsMobile();
 
 const query = ref('');
 const webUrlsText = ref('');
@@ -301,6 +304,8 @@ const publishPlan = ref<PublishPlan | null>(null);
 const publishing = ref(false);
 const drawerVisible = ref(false);
 const mapEl = ref<HTMLElement | null>(null);
+/** 抽屉宽度：手机端铺满屏幕，桌面端保持原有 380px */
+const drawerSize = computed(() => (isMobile.value ? '100%' : '380px'));
 const edit = reactive({ name: '', locationName: '', lng: 0, lat: 0 });
 const progress = computed(() => job.value?.status === 'queued' ? 12 : 62);
 const pendingItems = computed(() => review.value?.candidates.filter(item => item.reviewStatus === 'pending') || []);
@@ -670,11 +675,28 @@ const loadPreview = async () => {
 };
 onMounted(initMap);
 watch(() => review.value?.candidates, renderMarkers, { deep: true });
+// 高德地图实例不会感知容器的"非窗口"尺寸变化（侧栏折叠、断点切换、旋转屏幕后的重排），
+// 容器尺寸变化时补一次重排；容器随 review 被 v-if 卸载时自动解绑。
+let mapResizeObserver: ResizeObserver | null = null;
+watch(mapEl, el => {
+  mapResizeObserver?.disconnect();
+  mapResizeObserver = null;
+  if (!el || typeof ResizeObserver === 'undefined') return;
+  mapResizeObserver = new ResizeObserver(() => {
+    try { map?.resize?.(); } catch { /* 地图实例已销毁时忽略 */ }
+  });
+  mapResizeObserver.observe(el);
+});
 watch(pendingItems, items => {
   const ids = new Set(items.map(item => item.id));
   batchSelectedIds.value = batchSelectedIds.value.filter(id => ids.has(id));
 });
-onBeforeUnmount(() => { if (timer) window.clearInterval(timer); disposeMap(); });
+onBeforeUnmount(() => {
+  if (timer) window.clearInterval(timer);
+  mapResizeObserver?.disconnect();
+  mapResizeObserver = null;
+  disposeMap();
+});
 </script>
 
 <style scoped>
@@ -711,5 +733,8 @@ onBeforeUnmount(() => { if (timer) window.clearInterval(timer); disposeMap(); })
 .empty { padding: 40px 10px; text-align: center; color: #909399; font-size: 13px; } .coord-fields { display: flex; gap: 10px; } .coord-fields .el-form-item { flex: 1; }
 .quality-review { margin-top: 2px; padding: 12px; border: 1px solid #ebeef5; border-radius: 9px; background: #fafafa; } .quality-heading { display: flex; align-items: center; justify-content: space-between; color: #303133; font-size: 13px; } .quality-heading span { color: #606266; font-variant-numeric: tabular-nums; } .score-group { margin-top: 10px; } .score-group-title { margin-bottom: 7px; color: #909399; font-size: 12px; } .risk-group { padding-top: 9px; border-top: 1px dashed #dcdfe6; } .score-row { display: grid; grid-template-columns: 94px minmax(80px, 1fr) 32px; align-items: center; gap: 8px; margin: 7px 0; color: #606266; font-size: 12px; } .score-row b { text-align: right; color: #606266; font-size: 12px; font-variant-numeric: tabular-nums; } .legacy-quality { margin-top: 9px; color: #909399; font-size: 12px; } .confidence-reasons { margin-top: 12px; padding-top: 10px; border-top: 1px dashed #dcdfe6; color: #606266; font-size: 12px; } .confidence-reasons ul { margin: 7px 0 0; padding-left: 18px; } .confidence-reasons li { margin: 4px 0; line-height: 1.45; } .confidence-reasons p { margin-top: 7px; color: #909399; line-height: 1.45; }
 .evidence { border-top: 1px solid #ebeef5; padding-top: 12px; } .evidence div { margin: 8px 0; } .evidence dt { color: #909399; font-size: 12px; } .evidence dd { margin: 3px 0; color: #606266; font-size: 13px; line-height: 1.5; word-break: break-word; } .drawer-actions { justify-content: flex-end; margin-top: 22px; }
+/* 内容断点取 900px 而非骨架的 768px：769–900px 区间本页仍套用桌面骨架（含 240px 侧栏），
+   若此时用双列工作区（候选面板至少 320px + 地图列），地图列会被压到不可用，故仍按单列排布。
+   抽屉宽度已改为响应式（drawerSize），不依赖此断点。 */
 @media (max-width: 900px) { .campus-build-page { padding: 14px 12px 28px; } .page-header { align-items: flex-start; flex-direction: column; } .workspace { grid-template-columns: minmax(0, 1fr); } .map-panel { min-height: 430px; } .map { min-height: 430px; } .request-options { align-items: stretch; flex-direction: column; } .review-token-row { grid-template-columns: minmax(0, 1fr); } }
 </style>

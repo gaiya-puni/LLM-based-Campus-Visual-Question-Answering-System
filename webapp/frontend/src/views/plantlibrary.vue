@@ -32,6 +32,10 @@ interface User {
     number: string
     hasOwner: string
     key_phrase: string
+    ownerName: string
+    ownerTitle: string
+    slogan: string
+    content: string
 }
 
 const users = TryJson.map((data: any) => ({
@@ -44,7 +48,12 @@ const users = TryJson.map((data: any) => ({
     place: data.place,
     number: data.number,
     hasOwner: data.hasOwner,
-    key_phrase: data.key_phrase
+    key_phrase: data.key_phrase,
+    // 从植物库点「查看」与地图点选必须看到同一份认养与寄语信息
+    ownerName: data.owner?.name || '',
+    ownerTitle: data.owner?.title || '',
+    slogan: data.owner?.slogan || '',
+    content: data.owner?.content || ''
 }));
 
 const search = ref('')
@@ -68,5 +77,13 @@ const handleEdit = (row: User) => {
     overflow: hidden;
     height: 600px;
     overflow-y: auto;
+  }
+
+  /* 移动端：表格高度贴合视口，搜索框与按钮保持可点 */
+  @media (max-width: 768px) {
+    .table-container {
+      height: calc(100dvh - var(--mobile-topbar-h) - var(--mobile-tabbar-h) - 150px);
+      min-height: 320px;
+    }
   }
 </style>

@@ -15,13 +15,14 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from tools.campus_generator import harvest, web_search
+from tools.campus_generator import discovery, harvest, web_search
 from tools.campus_generator.outbound import (
     AMAP_PROXY_ENV,
     WEB_PROXY_ENV,
     direct_proxies,
     system_proxies,
 )
+from tools.campus_generator.discovery import CampusProfileResolver
 from tools.campus_generator.harvest import AmapPoiHarvester, PublicWebHarvester
 from tools.campus_generator.web_search import WebSearchClient
 
@@ -115,6 +116,39 @@ class RealRequestCallSiteTests(unittest.TestCase):
                 pass
 
         self.assertEqual(get.call_args.kwargs.get("proxies"), {})
+
+    def test_amap_geocoder_passes_direct_proxies(self):
+        """地理编码与 POI 搜索走同一条出站策略，曾经漏在这里。"""
+        resolver = CampusProfileResolver(api_key="key")
+
+        with patch.object(discovery.requests, "get", return_value=_FakeResponse()) as get:
+            resolver._request_json({"key": "key", "address": "示例大学", "output": "json"})
+
+        self.assertEqual(get.call_args.kwargs.get("proxies"), {"http": None, "https": None})
+
+    def test_amap_geocoder_honours_amap_proxy_env(self):
+        resolver = CampusProfileResolver(api_key="key")
+
+        with patch.dict("os.environ", {AMAP_PROXY_ENV: "http://127.0.0.1:7897"}), \
+                patch.object(discovery.requests, "get", return_value=_FakeResponse()) as get:
+            resolver._request_json({"key": "key", "address": "示例大学", "output": "json"})
+
+        self.assertEqual(get.call_args.kwargs.get("proxies"),
+                         {"http": "http://127.0.0.1:7897", "https": "http://127.0.0.1:7897"})
+
+    def test_amap_geocoder_network_error_names_the_exception(self):
+        """报错不能带 URL/Key，但必须能区分 ProxyError 与超时。"""
+        resolver = CampusProfileResolver(api_key="key")
+
+        with patch.object(discovery.requests, "get",
+                          side_effect=discovery.requests.exceptions.ProxyError("boom")):
+            with self.assertRaises(RuntimeError) as ctx:
+                resolver._request_json({"key": "key", "address": "示例大学", "output": "json"})
+
+        message = str(ctx.exception)
+        self.assertIn("network error", message)
+        self.assertIn("ProxyError", message)
+        self.assertNotIn("key=", message)
 
     def test_web_search_client_passes_proxies_for_both_providers(self):
         for provider in ("tavily", "brave"):

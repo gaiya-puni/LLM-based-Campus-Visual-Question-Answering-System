@@ -32,6 +32,24 @@ def get_cursor():
     return _local.cursor
 
 
+def commit():
+    """提交当前线程连接上的事务。
+
+    `get_cursor()` 刻意不自动提交（保持既有语义），因此需要事务的调用方
+    （如评论子系统的"表态 + 计数"、"举报 + 计数 + 折叠"）显式调它。
+    """
+    database = getattr(_local, 'db', None)
+    if database is not None:
+        database.commit()
+
+
+def rollback():
+    """回滚当前线程连接上的事务；用于多表写入失败时保持计数一致。"""
+    database = getattr(_local, 'db', None)
+    if database is not None:
+        database.rollback()
+
+
 @app.teardown_appcontext
 def close_database(_error=None):
     cursor = getattr(_local, 'cursor', None)

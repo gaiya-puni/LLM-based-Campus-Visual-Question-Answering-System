@@ -2,7 +2,7 @@
   <el-drawer
     :model-value="modelValue"
     direction="rtl"
-    size="420px"
+    :size="drawerSize"
     :with-header="false"
     @update:model-value="emit('update:modelValue', $event)"
   >
@@ -74,6 +74,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { Close } from '@element-plus/icons-vue';
+import { useIsMobile } from '../composables/useIsMobile';
 import { SOURCE_LABELS, STATUS_LABELS, type CandidateStatus, type PendingItem } from '../api/userdata';
 
 const props = defineProps<{
@@ -87,6 +88,10 @@ const emit = defineEmits<{
   (e: 'update:modelValue', value: boolean): void;
   (e: 'review', payload: { status: CandidateStatus; note: string }): void;
 }>();
+
+const isMobile = useIsMobile();
+// 移动端抽屉铺满屏幕，桌面端保持原有 420px 固定宽度
+const drawerSize = computed(() => (isMobile.value ? '100%' : '420px'));
 
 const note = ref('');
 const errorTip = computed(() => props.errorTip || '');
@@ -244,4 +249,34 @@ const review = (status: CandidateStatus) => {
 
 .reject-btn:disabled,
 .approve-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* 移动端：抽屉已铺满屏幕，这里收紧间距、放大触控热区并保证输入字号 >=16px。
+   注意 el-drawer 会 teleport 到 body，不在 .mobile-shell 内，style.css 的全局移动端规则覆盖不到。 */
+@media (max-width: 768px) {
+  .drawer-body {
+    gap: 14px;
+    padding: 2px;
+  }
+
+  .drawer-head {
+    h3 { font-size: 17px; }
+
+    .close-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 44px;
+      min-height: 44px;
+      margin: -8px -8px 0 auto;
+    }
+  }
+
+  .note-input { font-size: 16px; }
+
+  .reject-btn,
+  .approve-btn {
+    min-height: 44px;
+    font-size: 15px;
+  }
+}
 </style>

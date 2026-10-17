@@ -4,6 +4,177 @@ body {
   width: 100%;
 }
 
+/* ============================================================
+   移动端全局基础（桌面端不受影响）
+   断点约定：<=768px 移动端 / 769-1024px 平板 / >1024px 桌面
+   ============================================================ */
+:root {
+  --ecnu-red: #c20a1c;
+  --ecnu-red-dark: #a00818;
+  --ecnu-red-light: #e64553;
+  --mobile-topbar-h: 56px;
+  --mobile-tabbar-h: 60px;
+  --mobile-bp: 768px;
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-top: env(safe-area-inset-top, 0px);
+}
+
+/* 移动端通用：去掉点击高亮、限制 iOS 输入聚焦自动放大 */
+@media (max-width: 768px) {
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  #building {
+    background-attachment: scroll;
+  }
+
+  /* 小屏下输入类元素字号不低于 16px，避免 iOS Safari 聚焦时页面强制缩放 */
+  .mobile-shell input,
+  .mobile-shell textarea,
+  .mobile-shell select,
+  /* Element Plus 的 drawer / dialog / message-box 会 teleport 到 body，不在 .mobile-shell 内，
+     必须在此单独覆盖，否则手机上聚焦输入框仍会被 iOS Safari 强制放大页面 */
+  .el-drawer input,
+  .el-drawer textarea,
+  .el-dialog input,
+  .el-dialog textarea,
+  .el-message-box input,
+  .el-message-box textarea {
+    font-size: 16px;
+  }
+
+  /* Element Plus 弹层在小屏下的通用收紧 */
+  .mobile-shell .el-message {
+    max-width: calc(100vw - 32px);
+  }
+
+  /* el-dialog 默认宽度是 50%，手机上只剩半屏，内容被压成窄条。
+     必须是全局规则：dialog 会 teleport 到 body，渲染后的链路是
+     body > .el-overlay > .el-dialog，这些元素都不带任何组件 scopeId，
+     因此在组件里写 :deep(.el-dialog) 会被编译成 [data-v-xxx] .el-dialog，
+     永远匹配不上（message.vue / predict.vue 曾因此漏修，实测弹窗仍为 50%）。 */
+  .el-dialog {
+    width: calc(100vw - 24px) !important;
+    max-width: 560px;
+  }
+
+  /* 触控热区规范：移动端可点击元素不小于 44x44 */
+  .mobile-shell button,
+  .mobile-shell .el-button {
+    touch-action: manipulation;
+  }
+
+  /* 隐藏桌面 hover 依赖，改为 active 反馈 */
+  .mobile-shell .el-button:not(.is-disabled):active {
+    opacity: 0.85;
+  }
+}
+
+/* ===================== 点位留言板弹窗（高德 InfoWindow） =====================
+   弹窗内容由 components/commentInfoWindow.ts 生成，但**外层 .amap-info-* 元素是
+   高德自己创建并插入地图容器的**，不带任何组件 scopeId，因此收紧内边距只能写在
+   全局样式里（与上面 el-dialog 的 teleport 是同一类问题）。 */
+.amap-info-content {
+  padding: 6px 8px 8px;
+}
+
+.poi-comment-window {
+  max-width: min(300px, calc(100vw - 48px));
+}
+
+/* 顶部自定义区（点位简介 / 步行导航按钮）与留言板之间留一条分隔 */
+.poi-comment-window__header:not(:empty) {
+  padding-bottom: 6px;
+}
+
+/* 弹窗顶部的植物简介 + 认养寄语（由 map.vue 的 buildPlantHeader 生成，
+   是 innerHTML 插进来的节点，没有组件 scopeId，因此只能写在全局样式里） */
+.poi-head {
+  max-width: 280px;
+}
+
+.poi-head__title {
+  font-size: 13px;
+  color: #23262b;
+}
+
+.poi-head__title span {
+  color: #8f959e;
+  font-size: 11px;
+}
+
+.poi-head__sub {
+  color: #666;
+  font-size: 11.5px;
+}
+
+.poi-blessing {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border: 1px solid #f0e2c8;
+  border-radius: 8px;
+  background: #fffdf6;
+}
+
+.poi-blessing.is-empty {
+  border-color: #eceef2;
+  background: #fafbfc;
+}
+
+.poi-blessing__label {
+  margin: 0;
+  color: #a5895b;
+  font-size: 10.5px;
+  letter-spacing: 0.3px;
+}
+
+.poi-blessing__slogan {
+  margin: 3px 0 0;
+  color: #7a5c2e;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.poi-blessing__owner {
+  margin: 2px 0 0;
+  color: #9a8358;
+  font-size: 11px;
+}
+
+.poi-blessing__content {
+  margin: 4px 0 0;
+  color: #6b6252;
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+.poi-blessing__empty {
+  margin: 2px 0 0;
+  color: #a8abb2;
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+@media (max-width: 768px) {
+  .amap-info-content {
+    max-width: calc(100vw - 32px);
+    padding: 6px;
+  }
+
+  .poi-comment-window {
+    max-width: min(288px, calc(100vw - 40px));
+    /* 手机上一屏放不下「简介 + 寄语 + 留言板」：限制弹窗高度，
+       让整块内容（含寄语）统一上下滑动，而不是把地图全挡住 */
+    max-height: min(56vh, 420px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+
 .auth-page .container {
   width: 100%;
   max-width: 1140px;

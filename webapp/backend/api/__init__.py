@@ -7,9 +7,15 @@
 import paths  # noqa: F401
 from flask_app import app
 
-from api import auth_api, campus_build_api, chat_api, userdata_api
+from api import auth_api, campus_build_api, chat_api, comments_api, userdata_api
 
-BLUEPRINTS = (campus_build_api.bp, chat_api.bp, userdata_api.bp, auth_api.bp)
+BLUEPRINTS = (
+    campus_build_api.bp,
+    chat_api.bp,
+    userdata_api.bp,
+    comments_api.bp,
+    auth_api.bp,
+)
 
 for _blueprint in BLUEPRINTS:
     app.register_blueprint(_blueprint)

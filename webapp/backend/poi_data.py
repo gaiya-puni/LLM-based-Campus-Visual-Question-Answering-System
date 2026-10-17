@@ -48,6 +48,7 @@ _PLANT_TEMPLATE_BY_NAME = {p.get('name'): p for p in _PLANT_TEMPLATES if p.get('
 _TREE_PRECISE_LOCATIONS = {}  # {植物名: [精确位置描述, ...]}
 _TREE_COORDS = {}             # {植物名: [{lng, lat, number}, ...]}
 _TREE_POINTS = []             # 每棵植物的完整坐标与文本信息，用于规则评分推荐地点
+_TREE_BY_ID = {}              # {树 ID: 精简植物与认养信息}，供寄语页按 id 关联"这棵树是什么植物"
 for _t in _all_trees_raw:
     _name = (_t.get('template') or {}).get('name')
     _num = (_t.get('number') or '').strip()
@@ -73,6 +74,26 @@ for _t in _all_trees_raw:
             'owner_slogan': _owner.get('slogan', ''),
             'owner_content': _owner.get('content', ''),
         })
+    if _t.get('id') is not None:
+        _tree_template = _t.get('template') or {}
+        _tree_owner = _t.get('owner') or {}
+        _TREE_BY_ID[str(_t.get('id'))] = {
+            'plantName': _tree_template.get('name') or '',
+            'scientificName': _tree_template.get('scientificName') or '',
+            'branch': _tree_template.get('branch') or '',
+            'habit': _tree_template.get('habit') or '',
+            'icon': _tree_template.get('icon') or '',
+            # location = 树自身的编号或位置描述（number 字段）；
+            # place    = 原始数据的地点分组，粒度可能是"华东师大中山北路校区数学馆东北(友谊路)"，
+            #            不能直接当校区用，要归并后才谈得上"几个校区"。
+            'location': _num,
+            'place': _t.get('place') or '',
+            'lng': _lng,
+            'lat': _lat,
+            'likeCount': _t.get('likeCount') or 0,
+            'plantedAt': _t.get('createdAt') or '',
+            'ownerTitle': _tree_owner.get('title') or '',
+        }
 del _all_trees_raw
 
 # 加载仓库内的完整植树留言数据。
@@ -85,6 +106,20 @@ try:
 except (OSError, ValueError, json.JSONDecodeError) as exc:
     print(f'Unable to load emotion data: {exc}')
     _EMOTIONS = []
+
+# 寄语页要展示"这位寄语者认养的是哪棵植物"，按 id 关联 all_trees.json 的植物信息。
+# 只保留寄语实际涉及的那些 id（153 条量级），不把 2976 条全量树木数据推给前端。
+_EMOTION_PLANTS = {
+    str(_e.get('id')): _TREE_BY_ID[str(_e.get('id'))]
+    for _e in _EMOTIONS
+    if str(_e.get('id')) in _TREE_BY_ID
+}
+
+# 校园植物总览：寄语页用它说明"校园里一共有多少种植物"，与"被认养的只有 2 种"形成对照。
+_PLANT_STATS = {
+    'species': len(_PLANT_TEMPLATE_BY_NAME),   # 植物模板库里的种类数（193）
+    'trees': len(_TREE_BY_ID),                 # 已登记树木总数（2976）
+}
 
 
 def _discover_poi_data_files() -> tuple:

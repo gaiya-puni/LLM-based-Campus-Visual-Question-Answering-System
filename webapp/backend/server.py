@@ -32,8 +32,9 @@ import llm_config  # noqa: E402
 import poi_data  # noqa: E402
 import retrieval_engine  # noqa: E402
 import auth_db  # noqa: E402
+import comments_store  # noqa: E402  评论数据层：供门面透出，测试可整体替换
 import api  # noqa: E402,F401  导入即注册全部蓝图
-from api import auth_api, campus_build_api, chat_api, userdata_api  # noqa: E402
+from api import auth_api, campus_build_api, chat_api, comments_api, userdata_api  # noqa: E402
 from flask_app import app, rate_limit, warn_if_body_limit_too_small  # noqa: E402,F401
 # 行程编排入口：测试会整体替换它（`server.plan_day = spy`），因此在这里显式再导出，
 # 供 api/chat_api.py 通过 `runtime.facade` 读取。
@@ -59,8 +60,10 @@ _SUBMODULES = (
     poi_data,
     retrieval_engine,
     auth_db,
+    comments_store,
     campus_build_api,
     chat_api,
+    comments_api,
     userdata_api,
     auth_api,
 )

@@ -1,7 +1,7 @@
 <template>
   <div class="chatbot-page">
     <!-- 左侧地图 -->
-    <div class="map-panel">
+    <div class="map-panel" :class="{ 'mobile-hidden': isMobile && !mobileMapView }">
       <div class="campus-toggle">
         <button
           v-for="campus in CAMPUSES"
@@ -25,7 +25,7 @@
     </div>
 
     <!-- 右侧问答 -->
-    <div class="chatbot-container">
+    <div class="chatbot-container" :class="{ 'mobile-hidden': isMobile && mobileMapView }">
       <!-- 顶部标题栏 -->
       <div class="chatbot-header">
         <img src="@/assets/ecnu-logo.png" class="header-logo" alt="ECNU Logo" />
@@ -158,7 +158,7 @@
           >📷</el-button>
           <el-input
             v-model="inputMessage"
-            placeholder="输入您的问题，或上传一张校园照片问「这是哪儿」"
+            :placeholder="inputPlaceholder"
             class="input-field"
             @keyup.enter="sendMessage(inputMessage)"
             :disabled="isLoading"
@@ -176,6 +176,12 @@
       </div>
     </div>
 
+    <!-- 移动端视图切换：对话 / 地图 -->
+    <div v-if="isMobile" class="mobile-view-toggle">
+      <button type="button" :class="{ active: !mobileMapView }" @click="mobileMapView = false">对话</button>
+      <button type="button" :class="{ active: mobileMapView }" @click="mobileMapView = true">地图</button>
+    </div>
+
     <PlaceReportDialog
       v-model="placeReportOpen"
       :campus="placeReportContext.campus"
@@ -185,13 +191,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, shallowRef, computed, nextTick, onMounted, onUnmounted } from "vue";
+import { ref, shallowRef, computed, watch, nextTick, onMounted, onUnmounted } from "vue";
 import { marked } from "marked";
 import DOMPurify from 'dompurify';
 import SceneHeatmapPanel from '../components/SceneHeatmapPanel.vue';
 import ItineraryPanel from '../components/ItineraryPanel.vue';
 import MessageFeedback from '../components/MessageFeedback.vue';
 import PlaceReportDialog from '../components/PlaceReportDialog.vue';
+import { createCommentInfoWindowController } from '../components/commentInfoWindow';
+import { resolvePoiRef } from '../api/comments';
 import type { HeatmapPayload } from '../components/sceneHeatmapTypes';
 import type { ItineraryPayload, ItineraryStop } from '../components/itineraryTypes';
 import type { FeedbackRating } from '../api/userdata';
@@ -203,6 +211,7 @@ import {
   type ImageAttachment,
 } from '../components/imageAttach';
 import { loadAMap } from '../amap';
+import { useIsMobile } from '../composables/useIsMobile';
 import {
   CAMPUSES,
   CAMPUS_CENTERS,
@@ -310,11 +319,32 @@ const panelItinerary = computed(() => {
 const heatmapActive = ref(false);
 const heatmapReset = ref(0);
 
+// ---- 移动端适配：对话/地图双视图切换 ----
+const isMobile = useIsMobile();
+const mobileMapView = ref(false);
+// 输入框同一行还要放两个附件按钮与「发送」，窄屏放不下长文案，移动端换短提示
+const inputPlaceholder = computed(() => (isMobile.value
+  ? '问校园问题或上传照片'
+  : '输入您的问题，或上传一张校园照片问「这是哪儿」'));
+// 移动端：回答带出地图标注或热图激活时，自动切到地图视图，看完点"对话"返回
+watch([() => mapLocations.value.length, heatmapActive], ([locCount, heatOn]) => {
+  if (isMobile.value && (locCount > 0 || heatOn)) {
+    mobileMapView.value = true;
+  }
+});
+
 const MAX_GEO_ACCURACY_M = 800;
 
 let map: any = null;
 let markersArray: any[] = [];
-let markerInfoWindows: any[] = [];
+// 与 markersArray 同序的点位数据：行程面板按坐标回找标记后，要拿回原点位才能拼弹窗内容
+let markerLocations: Location[] = [];
+// 全地图共用一个留言板弹窗（内容走 DOM + Vue 组件，见 commentInfoWindow.ts）
+let commentWindow: any = null;
+// 问答结果的打点多数不带 POI id（聚类点/学院/附近植物都是合成来源），
+// 需要按坐标回落到真实点位才能挂留言板。这里缓存"点位 key → POI id"。
+const poiIdByLocation = new Map<string, string>();
+const poiIdPending = new Map<string, Promise<string>>();
 let walking: any = null;
 let userMarker: any = null;
 let geolocation: any = null;
@@ -349,6 +379,7 @@ const initMap = () => {
     center: centerForCampus(activeCampus.value),
   });
   heatmapMap.value = map;
+  commentWindow = createCommentInfoWindowController((window as any).AMap, -32);
 };
 
 const distanceMeters = (lng1: number, lat1: number, lng2: number, lat2: number) => {
@@ -462,10 +493,10 @@ const detectUserCampus = async () => {
 };
 
 const clearMarkers = () => {
-  markerInfoWindows.forEach(info => info.close());
-  markerInfoWindows = [];
+  commentWindow?.close();
   markersArray.forEach(m => m.setMap(null));
   markersArray = [];
+  markerLocations = [];
   if (walking) walking.clear();
   resetItineraryRouteState();
   if (userMarker) { userMarker.setMap(null); userMarker = null; }
@@ -503,6 +534,53 @@ const buildInfoContent = (loc: Location, navBtnId: string) => {
     ${loc.access_verified === false ? '<br><span style="color:#8a5a00;font-size:12px">真实POI参考位置，通行情况需现场确认</span>' : ''}
     <br><button id="${navBtnId}" style="margin-top:8px;padding:4px 12px;background:#c20a1c;color:white;border:none;border-radius:4px;cursor:pointer;font-size:13px">步行导航到这里</button>
   </div>`;
+};
+
+const locationKey = (loc: Location) => `${Number(loc.lng).toFixed(6)},${Number(loc.lat).toFixed(6)}`;
+
+/**
+ * 取该打点对应的 POI id（没有就返回空串，弹窗只显示原有介绍、不挂留言板）。
+ *
+ * 问答结果的打点来自多条链路，只有真实 POI 自带 id；其余按坐标就近回落。
+ * 同一坐标的并发点击共用一个请求，避免连点打出一串重复查询。
+ */
+const ensurePoiId = (loc: Location): Promise<string> => {
+  const key = locationKey(loc);
+  const cached = poiIdByLocation.get(key);
+  if (cached !== undefined) return Promise.resolve(cached);
+  const inflight = poiIdPending.get(key);
+  if (inflight) return inflight;
+  const task = resolvePoiRef(Number(loc.lng), Number(loc.lat), loc.name)
+    .then(ref => {
+      const poiId = ref?.id || '';
+      poiIdByLocation.set(key, poiId);
+      return poiId;
+    })
+    .finally(() => { poiIdPending.delete(key); });
+  poiIdPending.set(key, task);
+  return task;
+};
+
+// 弹窗打开有先后：连点不同标记时只允许最后一次生效，避免慢请求把旧点位的弹窗顶回来
+let commentOpenToken = 0;
+
+const openLocationInfoWindow = async (loc: Location, position: any) => {
+  if (!map || !commentWindow) return;
+  const token = ++commentOpenToken;
+  const navBtnId = `nav-btn-${token}`;
+  const poiId = await ensurePoiId(loc);
+  if (token !== commentOpenToken) return;
+  commentWindow.open(map, position, {
+    poiId,
+    poiName: loc.name,
+    header: {
+      html: buildInfoContent(loc, navBtnId),
+      bind: (root: HTMLElement) => {
+        const button = root.querySelector(`#${CSS.escape(navBtnId)}`) as HTMLElement | null;
+        if (button) button.onclick = () => navigateTo(loc.lng, loc.lat);
+      },
+    },
+  });
 };
 
 const pickMapLocations = (locations: Location[]) => {
@@ -562,7 +640,7 @@ const drawItineraryRoute = (locations: Location[]) => {
 const showLocationsOnMap = (locations: Location[]) => {
   clearMarkers();
   if (!locations.length || !map) return;
-  locations.forEach((loc, index) => {
+  locations.forEach((loc) => {
     const markerOptions: any = {
       map, position: [loc.lng, loc.lat], title: `${loc.name}（${loc.number}）`,
     };
@@ -579,21 +657,11 @@ const showLocationsOnMap = (locations: Location[]) => {
       };
     }
     const marker = new (window as any).AMap.Marker(markerOptions);
-    const navBtnId = `nav-btn-${index}-${loc.lng}-${loc.lat}`;
-    const infoWindow = new (window as any).AMap.InfoWindow({
-      content: buildInfoContent(loc, navBtnId),
-      offset: new (window as any).AMap.Pixel(0, -32),
-    });
-    markerInfoWindows.push(infoWindow);
-    marker.on('click', () => {
-      infoWindow.open(map, marker.getPosition());
-      setTimeout(() => {
-        const btn = document.getElementById(navBtnId);
-        if (btn) btn.onclick = () => navigateTo(loc.lng, loc.lat);
-      }, 100);
-    });
+    marker.on('click', () => { openLocationInfoWindow(loc, marker.getPosition()); });
     markersArray.push(marker);
   });
+  // 与 markersArray 同序保存，供行程面板"点击站点 → 回到地图弹窗"双向对应
+  markerLocations = locations;
   const hasItineraryStops = locations.some(loc => loc.kind === 'itinerary_stop');
   if (locations.some(loc => loc.access_verified === false) || hasItineraryStops) {
     // AMap padding order is top, bottom, left, right; keep new heatmap markers
@@ -658,8 +726,8 @@ const focusItineraryStop = (stop: ItineraryStop) => {
   });
   map.setZoom(17);
   map.setCenter([stop.lng, stop.lat]);
-  if (index >= 0 && markerInfoWindows[index]) {
-    markerInfoWindows[index].open(map, markersArray[index].getPosition());
+  if (index >= 0 && markerLocations[index]) {
+    openLocationInfoWindow(markerLocations[index], markersArray[index].getPosition());
   }
 };
 
@@ -724,6 +792,9 @@ onMounted(() => {
 
 onUnmounted(() => {
   clearMarkers();
+  // 必须先销毁共享弹窗里挂着的 Vue 应用，否则会留下游离的组件实例
+  commentWindow?.destroy();
+  commentWindow = null;
   heatmapMap.value = null;
   map?.destroy?.();
   map = null;
@@ -1397,4 +1468,98 @@ const scrollToBottom = () => {
 
 .chat-messages::-webkit-scrollbar { width: 5px; }
 .chat-messages::-webkit-scrollbar-thumb { background: #ffcdd2; border-radius: 3px; }
+
+/* ===================== 移动端适配 ===================== */
+.mobile-view-toggle { display: none; }
+
+@media (max-width: 768px) {
+  /* 页面在移动端壳内：顶部品牌栏之下、底部标签栏之上 */
+  .chatbot-page {
+    left: 0;
+    top: calc(var(--mobile-topbar-h) + var(--safe-area-top));
+    bottom: calc(var(--mobile-tabbar-h) + var(--safe-area-bottom));
+  }
+
+  /* 对话/地图切换胶囊（仅移动端显示） */
+  .mobile-view-toggle {
+    display: flex;
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 300;
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 999px;
+    padding: 4px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+
+    button {
+      border: none;
+      background: transparent;
+      color: #646a73;
+      font-size: 13px;
+      min-height: 36px;
+      padding: 6px 18px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+
+      &.active {
+        background: #c20a1c;
+        color: #fff;
+        font-weight: 600;
+      }
+    }
+  }
+
+  /* 两个面板都铺满整屏：切换时用 visibility 而不是 display:none。
+     原因：display:none 会让高德地图容器尺寸变为 0，切回地图时出现灰块/空白；
+     保持真实尺寸可让地图在后台正常完成渲染。 */
+  .map-panel,
+  .chatbot-container {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    flex: none;
+  }
+
+  .map-panel {
+    /* 给顶部切换胶囊让位 */
+    .campus-toggle { top: 56px; }
+  }
+
+  .map-panel.mobile-hidden,
+  .chatbot-container.mobile-hidden {
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  /* 品牌信息已由 App 移动端顶部栏承载，隐藏重复的渠道头部，
+     该位置让给"对话/地图"切换胶囊（避免标题被胶囊压住） */
+  .chatbot-header { display: none; }
+
+  /* 顶部留白避开浮动切换胶囊 */
+  .chat-messages { padding: 60px 12px 12px; }
+
+  .message-bubble { max-width: 88%; }
+
+  .chat-input-area {
+    padding: 10px 12px;
+
+    /* 窄屏一行要塞 2 个附件按钮 + 输入框 + 发送：间距收紧，输入框允许继续收缩 */
+    .input-wrapper { gap: 6px; }
+
+    .attach-btn {
+      min-height: 40px;
+      min-width: 40px;
+      padding: 0 8px;
+    }
+
+    .input-field { min-width: 0; }
+  }
+}
 </style>

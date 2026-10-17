@@ -135,6 +135,8 @@ USERDATA_REVIEW_TOKEN=至少16位的本地审核密钥
 
 用户共建数据默认写入 `webapp/backend/userdata/`，该目录已被 Git 忽略。没有审核密钥时，审核相关接口返回 403。
 
+同一枚密钥也决定「评论审核」页**是否出现在侧栏**：配好并重启后端后，`/api/review-status` 返回 `configured: true`，侧栏与移动端"更多"里才显示该入口（未配置时直达 `/#/comment-review` 会被守卫送回首页）。队友要用同一页时，把这枚密钥私下告知，他们首次打开页面粘贴一次即可（只存本机浏览器 localStorage，不入库）。后端接口始终校验请求头 `X-Review-Token`，密钥不对一律 403。
+
 #### 校园资产自动发现
 
 自动使用高德 POI 或公开网页搜索时，需要在根目录 `.env` 配置：
@@ -158,12 +160,16 @@ TAVILY_API_KEY=你的Tavily密钥
 | `/#/chatbot` | 智能问答、地图、热力图、行程规划和图片问答 |
 | `/#/place-review` | 用户共建数据审核 |
 | `/#/campus-build` | 校园资产发现、预览、审核和发布 |
+| `/#/comment-review` | 评论审核（**仅在后端配好审核密钥时出现**） |
+
+桌面端在**侧栏左下角**有「桌面端 / 手机端」胶囊开关（移动端为顶部品牌栏右侧的「桌面版」按钮）：点手机端会在 iPhone / Android 设备框里以真实窄视口加载本站（可切机型、横竖屏、缩放），因此在桌面浏览器里也能看到真实的移动端布局；真机访问时同一个按钮反向提供桌面版预览。也可直接用 `?frame=mobile` / `?frame=desktop` 强制端型。
 
 ## 后端 API
 
 | 接口 | 用途 |
 | --- | --- |
 | `GET /api/health` | 健康检查和能力状态 |
+| `GET /api/review-status` | 审核态开关（`configured` 布尔值，供前端决定审核入口显隐） |
 | `POST /api/chat` | 智能问答主接口 |
 | `GET /api/heatmaps` | 读取场景热力图缓存 |
 | `GET /api/emotions` | 读取认养寄语情感分析结果 |

@@ -68,6 +68,52 @@ class EmotionsRouteTests(_AuthRouteTestCase):
         self.assertEqual(response.get_json(), payload)
 
 
+class PlantStatsRouteTests(_AuthRouteTestCase):
+    """寄语页用校园植物种类数做对照（认养树只有 2 种，校园里其实有 193 种）。"""
+
+    def test_plant_stats_returns_the_summary_exposed_on_the_facade(self):
+        payload = {'species': 193, 'trees': 2976}
+
+        with patch.object(server, '_PLANT_STATS', payload):
+            response = self.client.get('/api/plant-stats')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json(), payload)
+
+    def test_plant_stats_species_matches_the_plant_template_library(self):
+        stats = server._PLANT_STATS
+
+        self.assertEqual(stats['species'], len(server._PLANT_TEMPLATE_BY_NAME))
+        self.assertGreater(stats['species'], 0)
+
+
+class EmotionPlantsRouteTests(_AuthRouteTestCase):
+    """寄语页要显示"这位寄语者认养的是哪棵植物"，索引单独成接口。
+
+    拆开的原因：`/api/emotions` 的返回值被测试与 `build_emotion_context` 当作
+    纯留言数据使用，往里加字段会同时影响两处。
+    """
+
+    def test_emotion_plants_returns_the_index_exposed_on_the_facade(self):
+        payload = {'3023': {'plantName': '东京樱花', 'branch': '蔷薇科'}}
+
+        with patch.object(server, '_EMOTION_PLANTS', payload):
+            response = self.client.get('/api/emotion-plants')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json(), payload)
+
+    def test_emotion_plants_is_keyed_by_emotion_id_and_carries_a_plant_name(self):
+        """真实数据下应当是按寄语 id 索引的对象，且每条都能给出植物名。"""
+        index = server._EMOTION_PLANTS
+
+        self.assertIsInstance(index, dict)
+        self.assertTrue(index, '仓库内的寄语数据应当能与树木数据按 id 关联上')
+        for emotion_id, plant in index.items():
+            self.assertEqual(emotion_id, str(emotion_id))
+            self.assertTrue(plant.get('plantName'), f'{emotion_id} 缺少植物名')
+
+
 class RegisterRouteTests(_AuthRouteTestCase):
     def test_missing_credentials_are_rejected(self):
         response = self.client.post('/api/register_json', json={})
