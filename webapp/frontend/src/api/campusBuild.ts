@@ -16,14 +16,22 @@ export interface WebSearchAudit {
 export interface CampusDiscoveryDetails {
   method?: string;
   query?: string;
+  cleanedQuery?: string;
   address?: string;
   resolvedSchool?: string;
   resolvedCampus?: string;
+  /** 中心来源：amap_poi / amap_geocode / local_config */
+  centerSource?: string;
+  center?: [number, number];
+  centerPoiName?: string;
+  radiusMeters?: number;
+  radiusSource?: string;
+  warning?: string;
 }
 
 export interface CampusProfileSummary {
   school?: { name?: string };
-  campus?: { name?: string; center?: [number, number]; slug?: string };
+  campus?: { name?: string; center?: [number, number]; slug?: string; trustRadiusM?: number };
   discovery?: CampusDiscoveryDetails;
 }
 
@@ -50,9 +58,23 @@ export interface CandidatePoi {
   confidenceReasons?: string[];
   sourceConfidence?: number;
   text?: string;
+  /** 采集证据；`distanceMeters` 仅高德链路写入，页面据此显示"距中心"。 */
   evidence?: Record<string, unknown>;
   reviewStatus: ReviewStatus;
   selectedForPreview?: boolean;
+  /** 用户在地图上手工补的点：只在本次任务内有效，不会进入正式数据。 */
+  userAdded?: boolean;
+}
+
+export interface UserPoiPayload {
+  name: string;
+  lng: number;
+  lat: number;
+  category?: 'plant' | 'scene';
+  subCategory?: string;
+  locationName?: string;
+  scenes?: string[];
+  text?: string;
 }
 
 export interface BuildJob {
@@ -86,16 +108,43 @@ export interface ReviewBundle {
   campus: string;
   profile?: CampusProfileSummary;
   candidates: CandidatePoi[];
+  /** 本任务内用户手工补的点（候选列表里同时出现，带 userAdded 标记）。 */
+  userAdded?: CandidatePoi[];
   pendingInvalid: Array<{ candidate?: Record<string, unknown>; reason?: string }>;
   approved: CandidatePoi[];
   selection?: { selectedIds: string[]; updatedAt?: string | null };
   validationProblems?: string[];
 }
 
+export interface PreviewGrid {
+  width: number;
+  height: number;
+  bounds: [number, number, number, number];
+  rowOrder: string;
+  values: number[];
+  maxValue: number;
+  noData: number;
+}
+
+export interface PreviewPlace {
+  name?: string;
+  lng?: number;
+  lat?: number;
+  score?: number;
+  rank?: number;
+  category?: string;
+}
+
 export interface PreviewResponse {
   success: boolean;
   jobId: string;
-  preview: any;
+  preview: {
+    grid?: PreviewGrid;
+    places?: PreviewPlace[];
+    scene?: string;
+    sceneName?: string;
+    [key: string]: unknown;
+  };
 }
 
 export interface PublishPlan {
@@ -194,6 +243,32 @@ export function getCampusPreview(jobId: string, scene: string, season?: string):
   const query = season ? `?season=${encodeURIComponent(season)}` : '';
   return fetch(`/api/campus/build/${encodeURIComponent(jobId)}/preview/${scene}${query}`)
     .then(response => readJson<PreviewResponse>(response, '/api/campus/preview'));
+}
+
+export function addCampusUserPoi(jobId: string, payload: UserPoiPayload): Promise<{
+  success: boolean;
+  jobId: string;
+  item: CandidatePoi;
+  count: number;
+  maxUserPois: number;
+  selection?: { selectedIds: string[]; updatedAt?: string | null };
+}> {
+  return fetch(`/api/campus/build/${encodeURIComponent(jobId)}/user-pois`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }).then(response => readJson(response, '/api/campus/user-pois'));
+}
+
+export function removeCampusUserPoi(jobId: string, poiId: string): Promise<{
+  success: boolean;
+  jobId: string;
+  removedId: string;
+  count: number;
+}> {
+  return fetch(`/api/campus/build/${encodeURIComponent(jobId)}/user-pois/${encodeURIComponent(poiId)}`, {
+    method: 'DELETE',
+  }).then(response => readJson(response, '/api/campus/user-pois'));
 }
 
 export function getCampusPublishPlan(jobId: string): Promise<{ success: boolean; jobId: string; plan: PublishPlan }> {

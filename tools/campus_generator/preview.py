@@ -13,10 +13,15 @@ from .boundary import covering_radius_m
 from .profile import write_json
 from .validate import validate_pois
 from .selection import load_selection
+from .user_pois import load_user_added
 
 
 ROOT = Path(__file__).resolve().parents[2]
 BACKEND = ROOT / "webapp" / "backend"
+
+#: 生成页预览允许的场景。前四项与 `scene_heatmaps.SCENE_IDS` 保持一致，
+#: 第五项 `density` 只存在于预览 workspace，不进入问答页缓存。
+PREVIEW_SCENE_IDS = ("flower_viewing", "photo", "walk", "date", "density")
 
 
 def _read(path: Path):
@@ -43,8 +48,21 @@ def _write_preview_pois(workspace: Path, profile: dict, approved: list[dict]) ->
     # Reviewed campus landmarks are much sparser than the original plant data.
     # Enlarge their local neighbourhoods, not the image bounds: stretching the
     # raster would move hotspots away from the POIs that support them.
-    config.update(supportMeters=200, minInfluenceMeters=120, maxInfluenceMeters=450,
+    # 2026-10-19：收紧凸包缓冲与核带宽，减少"热区比校园大一圈"的观感；
+    # density 场景（混合请求）用更小的缓冲，让热点边界贴近点位。
+    config.update(supportMeters=120, minInfluenceMeters=120, maxInfluenceMeters=300,
                   minimumCategoryActivation=0.2)
+    # 预览专用"点位密度"：混合类型请求（建筑 + 植物 + 地标）没有单一场景语义，
+    # 强行套 walk/photo 只会得到一层与点位无关的淡色。density 只写入预览 workspace，
+    # 不会进入问答页的 SCENE_IDS / 正式缓存。
+    scenes = config.setdefault("scenes", {})
+    scenes.setdefault("density", "点位密度")
+    overrides = config.setdefault("sceneCorpusOverrides", {})
+    overrides.setdefault(
+        "density",
+        "校园混合类型点位分布密度。用于建筑、植物、地标等多类地点同时出现的请求；"
+        "每个已选地点等权参与，不区分场景适宜度与植物观赏价值。",
+    )
     campus_name = campus["name"]
     existing = config.get("campuses", {}).get(campus_name)
     preview_campus = dict(existing or {})
@@ -65,8 +83,13 @@ def _write_preview_pois(workspace: Path, profile: dict, approved: list[dict]) ->
         poi = dict(item)
         # A reviewed scene POI without an explicit scene label is useful for a
         # preview, but must not silently disappear from every scene gate.
-        if poi.get("category") != "plant" and not poi.get("scenes"):
-            poi["scenes"] = ["walk", "date", "photo"]
+        if poi.get("category") != "plant":
+            scenes = list(poi.get("scenes") or []) or ["walk", "date", "photo"]
+            # 预览专用"点位密度"需要所有已选点位参与；只在预览 workspace 的
+            # POI 副本上追加，不改变正式资产。
+            if "density" not in scenes:
+                scenes.append("density")
+            poi["scenes"] = scenes
         prepared.append(poi)
     poi_path = workspace / f"{campus['slug']}_pois.json"
     write_json(poi_path, prepared)
@@ -86,6 +109,8 @@ def build_preview(output: str | Path) -> dict:
     if selection_path.is_file():
         normalized = _read(root / "normalized_pois.json")
         candidates = [item for item in normalized if isinstance(item, dict)]
+        # 用户手动补的点同样只是任务私有数据：它参与本次临时热图，但不进正式资产。
+        candidates += load_user_added(root)
         by_id = {str(item.get("id")): item for item in approved + candidates
                  if item.get("id")}
         selected_ids = load_selection(root, candidates)["selectedIds"]

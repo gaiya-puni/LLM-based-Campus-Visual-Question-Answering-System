@@ -174,11 +174,13 @@ X-Review-Token: <USERDATA_REVIEW_TOKEN>
 
 接口会完成：
 
-1. 从本地 `campuses.json` 解析已登记学校/校区；未知校区才使用高德地理编码补齐中心点。
-2. 根据自然语言主题生成有限关键词。
-3. 按学校、校区和主题生成最多两条搜索查询，自动发现并去重最多十个公开 HTTPS 页面；手工 `webUrls` 会一起保留。
-4. 载入已登记的真实植物和场景点位；高德和公开网页按主题补充步道、运动场、体育馆、河岸、亭子、桥、草坪和植物等候选，并排除明显商业噪声。搜索摘要命中某个有辨识度的高德地点名时，只记录为不参与质量加分的搜索线索，继续使用高德 GCJ-02 坐标；只有成功安全抓取的页面才算网页证据，也不会把网页 WGS84 坐标改标签冒充。
-5. 返回 `jobId` 和有界的 `webSearch` 审计摘要，通过 `GET /api/campus/build/<job_id>` 查询状态。缺少搜索 Key 或搜索服务暂时不可用时会明确警告，并继续运行手工网址、已登记数据和其他已启用来源。
+1. 从本地 `campuses.json` 解析已登记学校/校区；未登记学校先剥离“请你/给我/搜索/生成”等请求壳，再按“大学/学院后缀 + 左侧边界”抽取校名，然后用高德 POI（`place/text`）优先校正中心，地理编码只作地址与兜底，且返回地址必须包含校名。
+2. 未登记学校默认搜索半径 **1200m**（`CAMPUS_DISCOVERY_RADIUS_M` 可覆盖），输入里的“500米 / 1.5公里 / 2km内”优先；已登记校区继续使用 `campuses.json` 的 `trustRadiusM` / `boundary`。
+3. 根据自然语言主题生成有限关键词；用户显式写的类别（建筑、花草树木、地标、亭子、河岸、运动场、体育馆等）会排在默认词之前。
+4. 按学校、校区和主题生成最多两条搜索查询，自动发现并去重最多十个公开 HTTPS 页面；手工 `webUrls` 会一起保留。
+5. 载入已登记的真实植物和场景点位；高德和公开网页按主题补充步道、运动场、体育馆、河岸、亭子、桥、草坪和植物等候选，并排除明显商业噪声。搜索摘要命中某个有辨识度的高德地点名时，只记录为不参与质量加分的搜索线索，继续使用高德 GCJ-02 坐标；只有成功安全抓取的页面才算网页证据，也不会把网页 WGS84 坐标改标签冒充。
+6. 关键词召回之外，再用「网格 × POI 类型码」扫一遍：范围切 5×5 格，每格按高德 `types`（10 个大类，含 **120000 商务住宅**）搜索且不带 `keywords`；跨格按高德 ID 去重，单格失败只记录警告、不写缓存。这样院系、研究所、楼栋、校医院等名称不含主题词的地点也能进入候选。`CAMPUS_GRID_SCAN=0` 可关闭；请求量约为关键词召回的 3–5 倍（约 50–75 次/任务）。
+7. 返回 `jobId` 和有界的 `webSearch` 审计摘要，通过 `GET /api/campus/build/<job_id>` 查询状态。缺少搜索 Key 或搜索服务暂时不可用时会明确警告，并继续运行手工网址、已登记数据和其他已启用来源。
 
 任务输出写入 `webapp/backend/userdata/campus_builds/<job_id>/`，包括发现 profile、规范化 POI、待审核 POI 和构建报告；不会自动发布到正式校区配置或热图缓存。
 
@@ -223,7 +225,25 @@ X-Review-Token: <USERDATA_REVIEW_TOKEN>
 ```http
 GET /api/campus/build/<job_id>/preview/walk
 GET /api/campus/build/<job_id>/preview/photo?season=autumn
+GET /api/campus/build/<job_id>/preview/density
 ```
+
+### 校区中心、搜索范围与点位密度（2026-10-19）
+
+1. **解析结果可追溯**：`campus_profile.json` 的 `discovery` 增加
+   `cleanedQuery / center / centerSource / radiusMeters / radiusSource / warning`。
+   `centerSource` 取 `local_config | amap_poi | amap_geocode`；无法验证所写校区时
+   `resolvedCampus` 回退为校本部，并在 `warning` 里说明。
+2. **半径**：未登记学校默认 1200m，输入“1.5公里内”等写法可覆盖（夹在 300–3000m）；
+   已登记校区继续使用 `trustRadiusM`，页面展示的是覆盖校界的实际采集半径。
+3. **density 仅预览**：`preview.py` 在预览 workspace 的 `heatmap_config.json` 写入
+   `scenes.density = "点位密度"`，并给每个非植物候选的 `scenes` 追加 `"density"`；
+   `preview_heatmaps.py` 在 `scene == "density"` 时按类别点数加权，输出等权点位密度场。
+   `scene_heatmaps.SCENE_IDS`、`SceneHeatmapStore`、正式 `heatmap_cache/` 与问答页
+   四类场景完全不受影响。
+4. **预览核参数**：`supportMeters=120`、`maxInfluenceMeters=300`，热区边界更贴近点位；
+   前端 `PREVIEW_HEATMAP_OPTIONS` 使用 `stretch:"quantile"`（p10→0、p95→1），
+   只改显示、不改栅格数值。
 
 ## 正式发布
 

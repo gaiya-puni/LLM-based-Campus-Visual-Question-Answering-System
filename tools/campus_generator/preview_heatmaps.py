@@ -8,7 +8,7 @@ from functools import partial
 from pathlib import Path
 
 
-ALGORITHM_VERSION = "campus-preview-10-category-activation-floor"
+ALGORITHM_VERSION = "campus-preview-11-density-and-tighter-kernel"
 
 
 def fuse_preview_fields(geometry, similarities, plant_priors=None, season=None,
@@ -19,8 +19,34 @@ def fuse_preview_fields(geometry, similarities, plant_priors=None, season=None,
                                 season, scene, class_weights)
 
 
+def _density_fields(geometry):
+    """Preview-only point density: every approved POI contributes equally.
+
+    Class fields are already min-max normalized by ``prepare_geometry``; weighting
+    each class by its point count turns the sum into a point-density field.  This
+    is the honest answer for mixed requests ("建筑 + 花草树木 + 地标"), where no
+    single scene corpus applies.
+    """
+    import numpy as np
+    import scene_heatmaps as core
+
+    mask = geometry["mask"]
+    fields = geometry.get("fields") or {}
+    groups = geometry.get("groups") or {}
+    total = sum(len(indexes) for indexes in groups.values()) or 1
+    fused = np.zeros(len(mask))
+    contributions = {}
+    for name, indexes in groups.items():
+        part = fields[name] * (len(indexes) / total)
+        contributions[name] = part
+        fused = fused + part
+    return core.normalize(fused, mask), contributions, {name: 1.0 for name in fields}
+
+
 def _fuse_preview_fields(original_fuse, geometry, similarities, plant_priors=None,
                          season=None, scene=None, class_weights=None):
+    if scene == "density":
+        return _density_fields(geometry)
 
     config = geometry["config"]
     minimum = config.get("minimumCategoryActivation", 0.2)

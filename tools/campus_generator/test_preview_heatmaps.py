@@ -67,6 +67,38 @@ class PreviewHeatmapTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "minimumCategoryActivation"):
                     fuse_preview_fields(geometry, {"first": .5})
 
+    def test_density_scene_weights_each_class_by_its_point_count(self):
+        geometry = {
+            "config": self.config,
+            "mask": np.ones(4, dtype=bool),
+            "fields": {
+                "many": np.array([1., 1., 0., 0.]),
+                "few": np.array([0., 0., 1., 0.]),
+            },
+            "groups": {"many": [0, 1, 2], "few": [3]},
+            "class_categories": {"many": "facility", "few": "facility"},
+        }
+        field, contributions, betas = fuse_preview_fields(
+            geometry, {"many": .5, "few": .5}, scene="density",
+        )
+        # 3 个点的类别应比 1 个点的类别更高，且两者都不被丢弃。
+        self.assertGreater(field[0], field[2])
+        self.assertGreater(field[2], 0)
+        self.assertGreater(contributions["many"][0], contributions["few"][2])
+        self.assertTrue(all(beta == 1.0 for beta in betas.values()))
+
+    def test_density_scene_keeps_single_category(self):
+        geometry = {
+            "config": self.config,
+            "mask": np.ones(2, dtype=bool),
+            "fields": {"only": np.array([1., 0.])},
+            "groups": {"only": [0]},
+            "class_categories": {"only": "facility"},
+        }
+        field, _, _ = fuse_preview_fields(geometry, {"only": .3}, scene="density")
+        self.assertGreater(field[0], 0)
+        self.assertEqual(field[1], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

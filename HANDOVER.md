@@ -1,9 +1,12 @@
 # HANDOVER
 
 **面向**：下一位接手本项目的人
-**本文档创建于**：2026-10-14（2026-10-15 补移动端专章；同日补第二轮：缺陷修复与测试能力；2026-10-16 补第三、四轮：teleport 弹窗宽度修复 + 寄语列表改造；同日补第五轮：点位留言板与评论审核，见第七节；2026-10-17 补第六轮：审核入口显隐 / 留言板收紧 / 植物寄语回归 / 端切换，见第八节）
-**对应分支 / HEAD**：`test/dev` @ `2331b8c`（工作区另有未提交改动，勿用 `git reset --hard`）
-**最近一次改动**：2026-10-17 第六轮——**审核入口显隐 + 留言板收紧 + 植物寄语回归 + 端切换**。①「评论审核」入口改为**后端 `.env` 配好 `USERDATA_REVIEW_TOKEN`（≥16 位）才出现**：后端 `api/review_guard.py` 抽出 `review_configured()`、新增公开只读 `GET /api/review-status`，前端 `api/review.ts` + `composables/useReviewAccess.ts`（三态缓存）驱动 `views/sidebar.vue`、`App.vue` 移动端「更多」与 `router/index.ts` 的 `meta.requiresReview` 守卫；**不引入管理员角色、不改 `users` 表**。②`components/PoiCommentPanel.vue` 与 `style.css` 的高德外层整体收小（容器 320→276px、列表高 216→160px）。③`views/map.vue` / `plantcard.vue` / `plantlibrary.vue` 恢复认养人、寄语者单位与植物寄语（信笺块 + 全文折叠）。④新增 `composables/useDevicePreview.ts`、`components/ViewModeSwitch.vue`、`components/DevicePreviewFrame.vue`，`useIsMobile.ts` 支持 `?frame=mobile|desktop` 强制端型。**同日追加**：①`views/commentReview.vue` 外层补齐白色卡片底板（圆角 + 阴影 + 内边距），与「数据审核」页视觉对齐；②`App.vue` 在 ≤768px 关闭 `#building` 的 `scrollbar-gutter: stable` 并隐藏 `#building` / `.mobile-main` 滚动条，修掉移动端主页右侧那条 15px 白边；③`chatbot.vue` 输入框占位文案按端切换（移动端 `问校园问题或上传照片`），并把窄屏输入行间距收紧，解决占位文字被截断；④地图打点弹窗顶部补「认养与寄语」块（寄语在留言板之前），移动端弹窗改为**限高 + 整体上下滑动**（`.poi-comment-window` `max-height: min(56vh,420px)`），`.pc-body` 不再自己滚；⑤「寄语」页在搜索框下加**按植物种类筛选**的标签行（选项由数据现算、带条数，窄屏单行横滑）。**上一轮**（点位留言板与评论审核，见第七节）涉及 `PoiCommentPanel.vue`、`comments_api.py`、`comments_store.py` 等；`技术报告/`、`商业计划书/`、`data/` 均未改动
+**本文档创建于**：2026-10-14（2026-10-15 补移动端专章；同日补第二轮：缺陷修复与测试能力；2026-10-16 补第三、四轮：teleport 弹窗宽度修复 + 寄语列表改造；同日补第五轮：点位留言板与评论审核，见第七节；2026-10-17 补第六轮：审核入口显隐 / 留言板收紧 / 植物寄语回归 / 端切换，见第八节；2026-10-19 补第七轮：热力图生成语义解析与空间精度，见第九节；同日补第八轮：生成页候选数据概况图表，见第十节；同日补第九轮：采集召回率与候选分组，见第十一节；同日补第十轮：生成页用户手动补点，见第十二节）
+**对应分支 / HEAD**：`test/dev` @ `5dd1ea5`（工作区另有未提交改动，勿用 `git reset --hard`）
+**最近一次改动**：2026-10-19 第十轮——**生成页用户手动补点**：新增 `tools/campus_generator/user_pois.py`（任务私有层 `user_added_pois.json`），`review.py` 合并补点并支持管理员转正，`preview.py` 把补点纳入临时热图；新增 `POST/DELETE /api/campus/build/<id>/user-pois`（无需令牌，按会话隔离）；前端工具栏「手动补点」+ 地图落点 + 弹窗表单 + 「我的添加」分组。详见第十二节
+**上一轮改动**：2026-10-19 第九轮——**采集召回率 + 候选分组 + 得分差异化**：`harvest.py` 抽出 `_candidates_from_pois()` 并新增 `AmapGridTypeHarvester`（5×5 网格 × 高德 `types` 分类码，不带 `keywords`，含 120000 商务住宅；跨格按 `sourceId` 去重、单格失败隔离、逐格缓存）；`discovery.harvesters()` 接入，`CAMPUS_GRID_SCAN=0` 可关；`quality.py` 新增 `_AMAP_CATEGORY_RELEVANCE` 按大类给 `general` 主题分层相关度并对配套设施降权；`campusBuild.vue` 候选按 `subCategory` 分组，校园相关类型默认展开。详见第十一节
+**上一轮**：2026-10-19 第八轮——**生成页候选数据概况三图**（纯前端，后端与热图缓存零改动）：新增 `components/candidateSummary.ts`（质量分项均值 / 类别归一 / 距离分箱三个纯函数）与 `components/CandidateDataSummary.vue`（折叠区 + 三选一图），挂在 `views/campusBuild.vue` 候选面板的 `review-stats` 之下；`api/campusBuild.ts` 补 `CandidatePoi.evidence` 声明；新增 `tests/candidateSummary.test.mjs`（10 项）与 `npm run test:summary`。详见第十节
+**上一轮**：2026-10-19 第七轮——**热力图生成语义解析 + 校区中心/范围 + 点位密度预览**。①`tools/campus_generator/discovery.py`：请求前缀循环剥离 + “大学/学院后缀 + 左侧边界锚定”校名抽取，修复“你给我搜索北京大学”被当成校名；显式类别（建筑/花草树木/地标/亭子/河岸…）进入采集关键词；`infer_theme` 去掉单字“花”触发；`500米/1.5公里/2km内` 半径解析，未登记学校默认 **1200m**；`request_poi`（高德 place/text）优先校正中心，地理编码地址必须含校名，否则退“只编码校名”，校区无法验证时回退校本部并写 `discovery.warning`。②`harvest.py` 按 `sourceId` 与同名 30m 去重、按距离排序。③`preview.py` / `preview_heatmaps.py` 新增预览专用 **点位密度** 场景（混合类请求默认），收紧 `supportMeters` 200→120、`maxInfluenceMeters` 450→300；`campus_build_api` 预览白名单含 `density`。④前端 `campusBuild.vue` 展示中心/来源/半径/清洗后请求/回退提示，画搜索范围圆，候选显示“距中心 x m”，预览自动 `setBounds` + Top5 热区标签 + “显示已选点位”开关；`heatmapRender.ts` 新增仅预览使用的分位拉伸，`ImageLayer` 改显式 `AMap.Bounds`。**上一轮**（审核入口/留言板/寄语/端切换，见第八节）涉及 `review_guard.py`、`PoiCommentPanel.vue`、`ViewModeSwitch.vue` 等；`技术报告/`、`商业计划书/`、`data/`、正式 `heatmap_cache/` 均未改动
 
 ---
 
@@ -444,7 +447,179 @@ npm run test:mobile          # 8 视口 × 12 页面 = 96 项，含「评论审�
 2. 设备框可继续加：暗色模式模拟、网速模拟、一键导出当前预览截图。
 3. 地图数据源若换成 `data/all_trees.json`（2976 棵），认养寄语会从 7 条增加到 157 条，体验更完整；需要同时核对 marker 数量与首屏性能。
 
-## 九、快速自检命令
+## 九、热力图生成语义解析与空间精度专章（2026-10-19 新增）
+
+### 1. 改动范围
+
+| 层 | 文件 | 作用 |
+| --- | --- | --- |
+| 解析 | `tools/campus_generator/discovery.py` | 请求清洗、边界锚定校名、显式类别、主题、半径、POI 优先中心、地理码校验、`discovery` 元数据 |
+| 采集 | `tools/campus_generator/harvest.py` | 按 `sourceId` / 同名 30m 去重，按距离升序 |
+| 评分 | `tools/campus_generator/quality.py` | 只对 `general` 主题修正恒定 0.2 的相关度 |
+| 预览 | `tools/campus_generator/preview.py`、`preview_heatmaps.py` | density 场景、更紧的凸包缓冲与核带宽、按点数加权的密度场 |
+| API | `webapp/backend/api/campus_build_api.py` | 预览场景白名单 `PREVIEW_SCENE_IDS`（含 density） |
+| 前端 | `webapp/frontend/src/views/campusBuild.vue`、`components/heatmapRender.ts`、`components/SceneHeatmapPanel.vue`、`api/campusBuild.ts` | 解析结果、范围圆、距离、Top5 热区、点位开关、分位拉伸、显式 Bounds |
+| 测试 | `test_discovery_parser.py`、`test_generator.py`、`test_preview_heatmaps.py`、`test_spatial_alignment.py`（新）、`test_api_campus_build.py`、`tests/heatmapRender.test.mjs` | 长句/混合类别/半径/POI 中心/投影对齐/density/路由白名单 |
+
+### 2. 设计思路
+
+1. **规则先行、边界锚定**：没有为此引入 LLM。先循环剥离“请你/给我/搜索/生成”等前缀，再以“大学/学院”后缀为锚点，在左侧 16 字窗口内按标点与意图词取最后一个边界之后的子串；`_INSTITUTION_NOISE_RE` 拒绝含“请/帮/搜索/热力图/地点/你/我”的候选。这样“你给我搜索北京大学”→ 北京大学，而“上海交通大学”“华东师范大学”不受影响。
+2. **身份与意图分离**：`_clean_request` 仍会删“拍照/约会/食堂”等词用于拼采集关键词；主题与显式类别改从 `_request_intent_text`（保留主题词）读取，并先 `_strip_identity_terms` 去掉校名，避免“湖北大学”的“湖”被当成湖泊。
+3. **POI 优先、地理码校验**：`request_poi` 默认只在未注入 `request_json` 时启用（离线单测不发网络请求）。POI 只接受与校名对齐、且不是附属中学/小学/分校的点；地理编码地址必须包含校名，否则退到“只编码校名”，再不行用 POI。校区名无法验证时回退校本部，并写 `discovery.warning`。
+4. **密度场景只在预览**：`build_scene_heatmaps.py` 属于正式缓存指纹，**一行都不能改**；density 通过 `preview._write_preview_pois` 给每个非植物 POI 的 `scenes` 追加 `"density"` 实现（`pois_for_scene` 原逻辑即可选中），融合策略放在 `preview_heatmaps._density_fields`，按类别点数加权。`SCENE_IDS`、`SceneHeatmapStore`、`heatmap_cache/` 均未动。
+5. **显示拉伸与几何对齐**：`renderHeatmapCanvas` 新增 `stretch:"quantile"`（仅 `PREVIEW_HEATMAP_OPTIONS` 使用）；`ImageLayer` 全部改显式 `AMap.Bounds`；预览后 `map.setBounds` + `preview.places` 标签 + “显示已选点位”开关。
+
+### 3. 已知坑（务必先读）
+
+1. **不要修改正式热图的指纹文件**：`webapp/backend/build_scene_heatmaps.py`、`scene_heatmaps.py`、`heatmap_config.json`、`scene_profiles.json`、`semantic_retrieval.py` 与正式 POI 文件一旦改动，`heatmap_cache/manifest.json` 的 `sourceHash` 与 `test_scene_heatmaps.test_repository_cache_manifest_matches_current_sources` 立刻失败。density 必须留在 `tools/campus_generator/preview*.py` 与预览 workspace（本轮曾误改 `build_scene_heatmaps.py`，已回退）。
+2. **`request_poi` 的启用条件**：只有“使用默认 `request_json`”时才自动启用；单测/离线调用若同时注入 `request_json` 又想测 POI，必须显式传 `request_poi=`，否则不会发请求（这是故意的）。
+3. **校名边界词**：`_LEFT_BOUNDARY_TOKENS` 含单字“在/到/和/与/及/的”，已对正式校名做过枚举核对；“大学城/大学路/大学生”通过后缀后一个字符 `_INSTITUTION_TAIL_STOP` 排除。新增学校名若包含这些字，先跑 `test_discovery_parser.py`。
+4. **旧任务回退**：预览缓存按任务目录隔离，旧任务没有 `{slug}_density.json`；前端 `loadPreview` 在 density 读取失败时会自动切 walk 并提示，不要删掉这个兜底。
+5. **质量分不驱动热图**：0.68/0.69 是同一来源、同一半径策略下各分项相同造成的同分；`scene_heatmaps` 与 `preview.py` 根本不读 `quality`。不要为了“让热图更亮”改 `quality.py` 的权重，改显示或密度策略。
+6. **热区标签锚点**：`scene_heatmaps.hotspot_places` 的 `anchorRadiusMeters=90` 可能锚到“公共厕所/停车场”等设施；本轮未改，若要做必须重建正式缓存并同步更新所有指纹。
+
+### 4. 未来工作
+
+1. 为未登记学校接入真实校界（CAD/SHP/GeoJSON 或 OSM `amenity=university`），替换“中心 + 1.2km 圆”；OSM 坐标需显式 WGS84→GCJ-02 转换并审计。
+2. `request_poi` 支持城市限定（同名大学跨城时目前取高德相关度第一）。
+3. 质量分增加逐点证据（校名命中、距离分位、跨来源一致性），避免同源点位同分。
+4. 热区标签优先选择有中文语义的地标，过滤“厕所/停车场/出入口”。
+5. 若把 density 引入问答页，需扩展 `SCENE_IDS`、`validate_payload` 与缓存 manifest，并重建全部正式缓存。
+
+## 十、候选数据概况图表专章（2026-10-19 新增）
+
+### 1. 改动范围
+
+| 层 | 文件 | 作用 |
+| --- | --- | --- |
+| 统计 | `webapp/frontend/src/components/candidateSummary.ts`（新） | `summarizeQualityScores` / `summarizeSubCategories` / `summarizeDistances` / `radiusSourceLabel`，纯函数，不依赖 Vue 与 ECharts |
+| 展示 | `webapp/frontend/src/components/CandidateDataSummary.vue`（新） | 折叠区 + `el-radio-group` 三选一 + 复用 `Echarts.vue`；空态与降级文案集中在此 |
+| 挂载 | `webapp/frontend/src/views/campusBuild.vue` | 候选面板 `review-stats` 之后插一行组件 |
+| 类型 | `webapp/frontend/src/api/campusBuild.ts` | `CandidatePoi` 补 `evidence` 声明（页面早已在用 `item.evidence.distanceMeters`） |
+| 测试 | `webapp/frontend/tests/candidateSummary.test.mjs`（新）、`package.json` | 10 项边界测试，`npm run test:summary` |
+
+**后端、`heatmap_cache/`、`SCENE_IDS`、热图 `algorithm` 版本号一律未动**，26 张正式缓存与指纹测试不受影响。
+
+### 2. 设计思路
+
+1. **只加"视图"，不加"生成能力"**：用户不能自由指定图表类型，三张图的数据全部来自已有的 `GET /api/campus/build/:id/review` 响应，在前端一次 O(n) 统计后渲染。不新增接口、不发额外请求。
+2. **统计口径抽成纯 TS 函数**：`candidateSummary.ts` 不 import Vue 与 ECharts，因此可以用 `node:test` + `typescript.transpileModule` 直跑（沿用 `heatmapRender.test.mjs` 的范式，不引入 Vitest），边界断言不写进 `.vue`。
+3. **用 `el-radio-group` 而不是 `el-tabs`**：`el-tab-pane` 用 `v-show` 隐藏，非激活页签的容器宽高为 0，ECharts 会初始化成 100×100（本轮实测踩到）。改成 radio 切换 + `v-if` 后，图表每次都在已布局的容器里挂载。
+4. **默认展开、可折叠**：`.candidate-panel` 本身是 `max-height: 680px; overflow: auto`，三图平铺会挤掉候选列表；折叠 + 单图渲染把占位控制在约 260px。
+5. **统计包含已拒绝候选**：这是"本次采集长什么样"的概况，把被拒绝的样本排除会让质量虚高；区块标题写明"含已拒绝"。
+
+### 3. 已知坑（务必先读）
+
+1. **`category` 只有两类，不能用来分组**：`preview.py` 只放行 `plant` / `scene`，按 `category` 画饼图只会得到两个扇区。类别图必须按 `subCategory`，并把 `地点` / `待抽取地点` / `网页地点` / 空串并入"未分类"。
+2. **缺失分项不能当 0**：`summarizeQualityScores` 只对真实存在的键求均值。旧任务的 `quality.scores` 可能是空对象 `{}`，用 `quality.scores || scores` 这种写法不会回退（空对象是 truthy），必须逐键 `??` 读取。
+3. **`evidence.distanceMeters` 只有高德链路有**：本地配置、公开网页来源的点位没有该字段，图里必须显示"距离未知 N 个未计入分布"，不能静默丢弃。
+4. **半径参考线只是范围近似**：`getCampusPreview` 的 0~100 是相对强度，不可跨校区/跨场景比较（见 `PHASE2_HEATMAPS.md` 第 58 行）。本轮三张图都不做热度对比、不做排行榜、不做时间趋势。
+5. **图表高度必须由父容器给定**：`Echarts.vue` 默认 `height: 100%`，父容器没高度就会塌成 0。`CandidateDataSummary.vue` 用 `useIsMobile()` 切换 200px / 170px。
+6. **320px 下候选面板的 `scrollWidth - clientWidth = 6px` 是既有垂直滚动条占位**，不是横向溢出；页面级 `documentElement` 无溢出。写回归脚本时不要用面板级差值判溢出，应比较图表 `rect.right` 与面板 `rect.right`。
+
+### 4. 未来工作
+
+1. `classContributions` 后端已产出（`scene_heatmaps.py`），前端至今 0 引用；若要展示"类别参与构成"，只能算 `count × similarity` 的相对构成，**不能叫"贡献率"**——分类 Min-Max 会消去 beta 正值幅度。
+2. 若要把图表扩展到问答页，需要注意 `heatmap` 是单场景 payload、没有候选全集，统计口径要重新定义。
+3. 距离分布目前固定 8 箱；候选量很大时可考虑按分位数分箱，避免单箱压扁。
+4. 可选的下一步是"采集体检建议"：当某分项均值异常（如 `crossSourceAgreement` 全低）时给出一句可操作提示，而不只是画图。
+
+## 十一、采集召回率与候选分组专章（2026-10-19 新增）
+
+### 1. 为什么会有这一轮
+
+真实任务（北京大学，51 个候选）里，高德地图上可见的“外国语学院 / 历史学系 / 哲学系 / 高等人文研究院 / 3 号楼 / 8 号楼 / 人口研究所 / 北京大学医院”一个都没采到。根因不是评分或去重，而是**查询层就没有召回**：请求只带 `keywords`（12 个主题词），名称不含这些词的点永远不会返回；每词最多 3 页 × 25 条，还在中心区域先被占满。
+
+### 2. 改动范围
+
+| 层 | 文件 | 作用 |
+| --- | --- | --- |
+| 采集 | `tools/campus_generator/harvest.py` | 抽出 `_candidates_from_pois()`；新增 `AmapGridTypeHarvester`（网格 × `types`）、`CAMPUS_POI_TYPES` 类型码表 |
+| 编排 | `tools/campus_generator/discovery.py` | `harvesters()` 追加网格扫描；`CAMPUS_GRID_SCAN=0` 关闭 |
+| 评分 | `tools/campus_generator/quality.py` | `_AMAP_CATEGORY_RELEVANCE` + `_PASSIVE_NAME_TERMS` / `_SCENIC_NAME_TERMS` 名称微调 |
+| 前端 | `webapp/frontend/src/views/campusBuild.vue` | `candidateGroups` 分组、`groupOpenState` 记住手动开合、组头样式 |
+| 测试 | `tools/campus_generator/test_amap_grid.py`（新） | 8 项：铺满、types 请求、跨格去重、失败隔离、缓存、缺 key、类型差异化、配套降权 |
+
+### 3. 设计思路
+
+1. **两种召回并存，不替换**：关键词召回负责“主题明确”的点（图书馆、湖、亭子），网格类型扫描负责“名称不含主题词但确实是校内设施”的点。两者共用 `_candidates_from_pois`，保证字段、证据、范围判定完全一致。
+2. **网格而非单点放大半径**：单点 around 的结果按距离排序且有上限，范围越大越集中；切成 5×5 后每格半径约 400m，相邻格留 20% 重叠，没有空洞。
+3. **类型码必须包含 `120000 商务住宅`**：否则“3 号楼 / 8 号楼 / 新楼”这类楼栋名永远采不到，这是漏采里占比最大的一类。
+4. **单格失败不影响整批**：每格独立 try，失败只写 warning；只有完整翻完页的格才写缓存，避免把残缺结果固化。
+5. **得分分层的依据是“类型与场景的关系”**，不是对具体地点的猜测：风景名胜 0.92 → 生活服务 0.38，名称含“学院/研究院/图书馆/湖/亭”加 0.06，含“停车场/快递/便利店/宿舍”减 0.10。
+
+### 4. 已知坑（务必先读）
+
+1. **请求量涨 3–5 倍**：5×5 格 × 每格最多 5 页 ≈ 50–75 次/任务，`AMAP_REQUEST_INTERVAL_SECONDS` 默认 0.25s，采集时间约 1–2 分钟。高德个人 key 的日配额与 QPS 3 要自己核对；先跑一个校区再批量用。
+2. **候选量会从几十涨到几百**：前端已按类型分组并默认折叠商业配套，但“全选候选”仍作用于全部条目；一次勾选几百个点后生成临时热图会很慢。
+3. **缓存键含 `policy`**：改了 `CAMPUS_POI_TYPES` 或网格数必须同时升 `POLICY_VERSION`，否则旧缓存会掩盖新类型。
+4. **质量分不驱动热图**：`themeRelevance` 变细只影响审核排序与数据概况图；热图强度仍由点密度 × 类别场景相似度决定（见 `PHASE2_HEATMAPS.md` 第 58 行）。不要因为“想更亮”去改 `quality.py` 的权重。
+5. **正式缓存不受影响**：问答页四类场景热图读的是正式 POI 与 26 张缓存，只有生成页的 `preview_heatmap_cache` 会用上新采的点。
+6. **`_dedupe_candidates` 现在会跳过缺坐标的条目**：损坏缓存不再让整批采集崩掉，但也意味着坏数据是静默丢弃的，排查时看 warnings。
+
+### 5. 未来工作
+
+1. 真实链路跑一次（先北京/闵行各一次），记录候选总量、类型分布与高德配额消耗，再决定是否调网格数或类型白名单。
+2. 类型白名单目前写死在 `CAMPUS_POI_TYPES`，可按学校类型（医学院/艺术院校）配置化。
+3. 候选过百时，“全选候选”应改成按分组勾选；现在只能逐组手点。
+4. 若要把“类型权重”也带进预览热图，需要同时改 `_density_fields` 与 `test_preview_heatmaps.py` 的等权断言，并升级 `ALGORITHM_VERSION`——本轮没做，保持“点位密度”的等权语义。
+
+## 十二、用户手动补点专章（2026-10-19 新增）
+
+### 1. 改动范围
+
+| 层 | 文件 | 作用 |
+| --- | --- | --- |
+| 私有层 | `tools/campus_generator/user_pois.py`（新） | `user_added_pois.json` 的读写、校验、去重、上限（20）、自动并入 selection |
+| 审核 | `tools/campus_generator/review.py` | `load_review()` 合并补点（`userAdded` 字段）；`apply_review()` 允许管理员转正并从补点层移除 |
+| 预览 | `tools/campus_generator/preview.py` | `build_preview()` 候选池加入补点 |
+| API | `webapp/backend/api/campus_build_api.py` | `POST /api/campus/build/<id>/user-pois`、`DELETE /api/campus/build/<id>/user-pois/<poi_id>` |
+| 前端 | `webapp/frontend/src/views/campusBuild.vue`、`src/api/campusBuild.ts` | 工具栏「手动补点」、地图落点、弹窗表单、「我的添加」分组与删除 |
+| 测试 | `tools/campus_generator/test_user_pois.py`（新）、`webapp/backend/test_api_campus_user_pois.py`（新） | 逻辑 5 项 + 路由 3 项 |
+
+### 2. 数据流
+
+```text
+地图点击（补点模式）
+→ POST /user-pois（校验坐标/校界/去重/上限）
+→ 写 userdata/campus_builds/<job>/user_added_pois.json
+→ 自动追加进 preview_selection.json
+→ build_preview() 的候选池 = normalized_pois.json + user_added_pois.json
+→ 只写入 preview_workspace/ 与 preview_heatmap_cache/，正式资产不变
+```
+
+管理员路径（唯一转正入口）：
+
+```text
+POST /review  {"id": <补点 id>, "action": "approve"}
+→ normalize_candidate 再次校验边界与置信度
+→ 写 approved_pois.json，并把该点追加到 normalized_pois.json
+→ 从 user_added_pois.json 删除（避免审核视图出现两份）
+```
+
+### 3. 设计思路
+
+1. **私有层而非候选池**：`normalized_pois.json` 的语义是"采集结果"，有 `source`、`sourceUrls`、`evidence`。用户补点没有这些证据，写进去会让"待审 N 条"和来源占比失真，也无法整层撤销。
+2. **补点自动选中**：`add_user_added()` 内部直接改 `preview_selection.json`，用户点完就能生成热图，不必再回头勾选。
+3. **15 米去重**：核密度图会把邻近点叠成更亮的斑，用户会误判"多标几次更热"。重复时错误信息直接给出"请直接勾选已有地点"。
+4. **不伪造质量分**：`source="manual"` 命中 `quality._SOURCE_RELIABILITY` 的 0.55，`confidence=0.45`、`verified=false`，证据分照常偏低。这是设计而非缺陷。
+5. **移动端友好**：不用右键菜单，改为"按钮进入补点模式 + 下一次地图 click 落点"。
+
+### 4. 已知坑
+
+1. **不要改成写 `normalized_pois.json`**：`save_selection()` 只接受候选清单内的 id；把补点混进候选池虽然能让 selection 逻辑少改一处，但会让"机器采集 vs 人工补录"彻底无法区分，也让管理员无法整批拒绝。
+2. **`_campus_job_access` 的会话隔离**：补点端点用与会话绑定的 `ownerId`，别人的任务返回 404（不是 403）。改权限时保持这个语义，否则会把别人的临时任务暴露成可探测资源。
+3. **转正后要同时改两个文件**：`approved_pois.json` + `normalized_pois.json`（追加），并把补点从 `user_added_pois.json` 移除；漏掉任何一步都会出现"列表里两份"或"正式通过但列表看不到"。
+4. **旧预览必须作废**：三个写入口（补点、删除、selection）都要调 `invalidate_preview()`，否则前端会拿旧网格对照新点位。
+5. **15 米阈值是经验值**：校园中心区 POI 密集，若真的需要标注相邻两棵树，调 `MIN_SEPARATION_METERS` 而不是删掉去重。
+
+### 5. 未来工作
+
+1. 补点可以考虑加"上传一张照片作为证据"，把 `evidence` 从纯文本变成可核验附件。
+2. 若管理员审核面板要区分来源，`userAdded` 已有标记，可直接在列表加筛选。
+3. 端到端跑批："3 个候选 + 2 个补点 → 生成临时热图"尚未在浏览器验收，建议下次联调补上。
+
+## 十三、快速自检命令
 
 ```powershell
 cd 技术报告/build
@@ -459,7 +634,8 @@ python finance_model.py         # 打印财务测算摘要
 
 cd webapp/frontend
 npx vue-tsc --noEmit     # 类型检查
-npm run test:heatmap     # 热力图渲染测试（9 项）
+npm run test:heatmap     # 热力图渲染测试（10 项）
+npm run test:summary     # 候选数据概况统计测试（10 项）
 npm run test:assets      # 前端资源测试（3 项）
 npm run test:mobile      # 移动端多视口巡检（96 项 = 8 视口 × 12 页面，复用本机浏览器，不下载）
                          # 注意：它复用 build/ 里的产物（存在即跳过构建），改完代码先 npm run build

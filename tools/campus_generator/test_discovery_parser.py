@@ -8,17 +8,21 @@ from unittest.mock import patch
 import requests
 
 from tools.campus_generator.discovery import (
+    DEFAULT_DISCOVERY_RADIUS_M,
     CampusProfileResolver,
+    DiscoveryOrchestrator,
     _clean_request,
+    _requested_keywords,
     _scoped_keyword,
+    infer_theme,
 )
 
 
-def _geocode_payload(address: str) -> dict:
+def _geocode_payload(address: str, location: str = "121.5036,31.2824") -> dict:
     return {
         "status": "1",
         "geocodes": [{
-            "location": "121.5036,31.2824",
+            "location": location,
             "formatted_address": address,
         }],
     }
@@ -265,6 +269,124 @@ class CampusDiscoveryParserTests(unittest.TestCase):
                     _clean_request(f"帮我{action}上海同济大学四平路校区的热力图"),
                     "同济大学四平路校区",
                 )
+
+
+class LongRequestSemanticParsingTests(unittest.TestCase):
+    """用户原句：长礼貌语 + 动词 + 多个类别，不能把前缀算进校名。"""
+
+    def test_verb_prefixed_long_request_keeps_clean_school_name(self):
+        calls = []
+
+        def fake_request(params):
+            calls.append(dict(params))
+            return _geocode_payload("北京市海淀区北京大学")
+
+        resolver = _EmptyConfigResolver(api_key="test-key", request_json=fake_request)
+        profile = resolver.resolve(
+            "请你给我搜索北京大学的建筑、花草树木、地标等一系列地点并生成热力图"
+        )
+
+        self.assertEqual(calls[0]["address"], "北京大学")
+        self.assertEqual(profile["school"]["name"], "北京大学")
+        self.assertEqual(profile["campus"]["name"], "北京大学")
+        self.assertEqual(profile["discovery"]["resolvedSchool"], "北京大学")
+        self.assertEqual(profile["discovery"]["resolvedCampus"], "北京大学")
+        self.assertNotRegex(profile["school"]["name"], r"你|我|搜索|生成")
+        self.assertEqual(
+            _scoped_keyword(profile, "树木"), "北京大学 树木",
+        )
+        self.assertEqual(
+            profile["campus"]["trustRadiusM"], DEFAULT_DISCOVERY_RADIUS_M,
+        )
+        self.assertEqual(profile["discovery"]["centerSource"], "amap_geocode")
+
+    def test_mixed_categories_use_general_theme_and_keep_explicit_keywords(self):
+        class _StubResolver:
+            def resolve(self, query):
+                return {
+                    "school": {"name": "北京大学"},
+                    "campus": {"name": "北京大学", "slug": "campus_x",
+                               "trustRadiusM": 1200},
+                    "discovery": {"method": "amap_geocode", "warning": "示例提示"},
+                }
+
+        plan = DiscoveryOrchestrator(_StubResolver()).plan(
+            "请你给我搜索北京大学的建筑、花草树木、地标等一系列地点并生成热力图",
+            include_web=False,
+        )
+        self.assertEqual(plan.theme, "general")
+        self.assertEqual(plan.keywords[:4], ["建筑", "地标建筑", "树木", "植物"])
+        self.assertIn("示例提示", plan.warnings)
+        self.assertEqual(infer_theme("北京大学的赏花热力图"), "flower")
+        self.assertEqual(infer_theme("北京大学的建筑与花草树木"), "general")
+        self.assertIn("湖泊", _requested_keywords("校园里的湖泊和桥"))
+
+    def test_query_radius_overrides_default(self):
+        resolver = _EmptyConfigResolver(
+            api_key="test-key",
+            request_json=lambda _: _geocode_payload("北京市海淀区北京大学"),
+        )
+        profile = resolver.resolve("北京大学 2公里内的植物热力图")
+        self.assertEqual(profile["campus"]["trustRadiusM"], 2000)
+        self.assertEqual(profile["discovery"]["radiusSource"], "query")
+        self.assertEqual(profile["school"]["name"], "北京大学")
+
+    def test_poi_center_corrects_wrong_campus_geocode(self):
+        def fake_geocode(params):
+            if params["address"] == "北京大学":
+                return _geocode_payload("北京市海淀区北京大学", "116.310918,39.992873")
+            return _geocode_payload("北京市海淀区海淀校区", "116.365794,39.964872")
+
+        def fake_poi(params):
+            return {"status": "1", "pois": [{
+                "name": "北京大学",
+                "location": "116.310918,39.992873",
+                "type": "科教文化服务;学校;高等院校",
+            }]}
+
+        resolver = _EmptyConfigResolver(
+            api_key="test-key", request_json=fake_geocode, request_poi=fake_poi,
+        )
+        profile = resolver.resolve("北京大学海淀校区")
+
+        self.assertEqual(profile["campus"]["name"], "北京大学")
+        self.assertEqual(profile["discovery"]["resolvedCampus"], "北京大学")
+        self.assertAlmostEqual(profile["campus"]["center"][0], 116.310918, places=5)
+        self.assertAlmostEqual(profile["campus"]["center"][1], 39.992873, places=5)
+        self.assertEqual(profile["discovery"]["centerSource"], "amap_poi")
+        self.assertIn("未能定位到", profile["discovery"]["warning"])
+
+    def test_school_level_poi_does_not_override_verified_campus_geocode(self):
+        def fake_geocode(params):
+            if params["address"] == "上海交通大学徐汇校区":
+                return _geocode_payload(
+                    "上海市徐汇区上海交通大学徐汇校区", "121.4360,31.1900",
+                )
+            return _geocode_payload("上海市闵行区上海交通大学", "121.4369,31.0256")
+
+        def fake_poi(params):
+            return {"status": "1", "pois": [{
+                "name": "上海交通大学",
+                "location": "121.4369,31.0256",
+                "type": "科教文化服务;学校;高等院校",
+            }]}
+
+        resolver = _EmptyConfigResolver(
+            api_key="test-key", request_json=fake_geocode, request_poi=fake_poi,
+        )
+        profile = resolver.resolve("上海交通大学徐汇校区")
+
+        self.assertEqual(profile["campus"]["name"], "徐汇校区")
+        self.assertAlmostEqual(profile["campus"]["center"][0], 121.4360, places=4)
+        self.assertAlmostEqual(profile["campus"]["center"][1], 31.1900, places=4)
+        self.assertEqual(profile["discovery"]["centerSource"], "amap_geocode")
+
+    def test_poi_lookup_is_disabled_for_injected_geocoders(self):
+        resolver = _EmptyConfigResolver(
+            api_key="test-key",
+            request_json=lambda _: _geocode_payload("示例大学"),
+        )
+        self.assertIsNone(resolver.request_poi)
 
 
 if __name__ == "__main__":

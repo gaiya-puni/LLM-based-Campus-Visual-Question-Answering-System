@@ -7,7 +7,7 @@ const source = await readFile(new URL('../src/components/heatmapRender.ts', impo
 const { outputText } = ts.transpileModule(source, {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
 });
-const { alphaFor, upsampleGrid, renderHeatmapCanvas, CHAT_HEATMAP_OPTIONS, PREVIEW_HEATMAP_OPTIONS, HEATMAP_UPSCALE, HEATMAP_BLUR_PX } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
+const { alphaFor, upsampleGrid, renderHeatmapCanvas, quantileBounds, CHAT_HEATMAP_OPTIONS, PREVIEW_HEATMAP_OPTIONS, HEATMAP_UPSCALE, HEATMAP_BLUR_PX } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
 const previewAlpha = t => alphaFor(t, PREVIEW_HEATMAP_OPTIONS.threshold, PREVIEW_HEATMAP_OPTIONS.alphaExponent);
 
 test('chat can explicitly disable contour outlines while preview keeps its own options', () => {
@@ -172,5 +172,49 @@ test('chat low and medium heat remain clear on bright tiles without changing pre
   }
   assert.equal(PREVIEW_HEATMAP_OPTIONS.threshold, 0.05);
   assert.equal(PREVIEW_HEATMAP_OPTIONS.alphaExponent, 0.9);
-  assert.equal(PREVIEW_HEATMAP_OPTIONS.blurPx, 18);
+  assert.equal(PREVIEW_HEATMAP_OPTIONS.blurPx, 10);
+  assert.equal(PREVIEW_HEATMAP_OPTIONS.stretch, 'quantile');
+  assert.equal(CHAT_HEATMAP_OPTIONS.stretch, undefined);
+});
+
+test('quantile stretch only changes preview display, not values or chat output', () => {
+  const values = Array.from({ length: 100 }, (_, index) => 100 + index * 5);
+  const bounds = quantileBounds(values, -1, 0.1, 0.95);
+  assert.deepEqual(bounds, [145, 570]);
+  assert.equal(quantileBounds([1, 2, 3], -1), null);
+  assert.equal(quantileBounds([1000, -1, -1, -1, -1, -1, -1, -1], -1), null);
+
+  const originalDocument = globalThis.document;
+  globalThis.document = {
+    createElement: () => {
+      const canvas = {};
+      const context = {
+        createImageData: (width, height) => ({ data: new Uint8ClampedArray(width * height * 4) }),
+        putImageData: raster => { canvas.raster = raster; },
+        getImageData: () => ({ data: canvas.raster.data.slice() }),
+        clearRect: () => {},
+      };
+      canvas.getContext = () => context;
+      return canvas;
+    },
+  };
+  try {
+    const grid = {
+      width: 10, height: 10, bounds: [0, 0, 1, 1], rowOrder: 'north_to_south',
+      values: new Array(100).fill(0).map((_, index) => 200 + index * 5),
+      maxValue: 1000, noData: -1,
+    };
+    const before = grid.values.slice();
+    const linear = renderHeatmapCanvas(grid, { upscale: 1, blurPx: 0, threshold: 0.05, contours: false });
+    const quantile = renderHeatmapCanvas(grid, {
+      upscale: 1, blurPx: 0, threshold: 0.05, contours: false, stretch: 'quantile',
+    });
+    const linearMid = linear.raster.data[(5 * 10 + 5) * 4 + 3];
+    const quantileMid = quantile.raster.data[(5 * 10 + 5) * 4 + 3];
+    assert.ok(quantileMid > linearMid);
+    assert.deepEqual(grid.values, before);
+  } finally {
+    if (originalDocument === undefined) delete globalThis.document;
+    else globalThis.document = originalDocument;
+  }
 });

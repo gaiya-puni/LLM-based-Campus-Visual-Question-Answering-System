@@ -67,8 +67,15 @@
           <div><dt>学校</dt><dd>{{ resolvedDiscovery.school || '未返回' }}</dd></div>
           <div><dt>校区</dt><dd>{{ resolvedDiscovery.campus || '未返回' }}</dd></div>
           <div><dt>方式</dt><dd>{{ discoveryMethodLabel(resolvedDiscovery.method) }}</dd></div>
+          <div v-if="resolvedDiscovery.center"><dt>中心</dt><dd>{{ resolvedDiscovery.center }}</dd></div>
+          <div v-if="resolvedDiscovery.centerSource">
+            <dt>中心来源</dt><dd>{{ centerSourceLabel(resolvedDiscovery.centerSource) }}</dd>
+          </div>
+          <div v-if="resolvedDiscovery.radius"><dt>搜索半径</dt><dd>{{ resolvedDiscovery.radius }}</dd></div>
+          <div v-if="resolvedDiscovery.cleanedQuery"><dt>清洗后请求</dt><dd>{{ resolvedDiscovery.cleanedQuery }}</dd></div>
           <div v-if="resolvedDiscovery.address"><dt>地址</dt><dd>{{ resolvedDiscovery.address }}</dd></div>
         </dl>
+        <p v-if="resolvedDiscovery.warning" class="discovery-warning">{{ resolvedDiscovery.warning }}</p>
       </div>
       <div v-if="showZeroCandidateHelp" class="zero-candidate-help" role="alert">
         <strong>未发现可用地点</strong>
@@ -105,6 +112,11 @@
           <el-tag type="success">正式通过 {{ review.approved.length }}</el-tag>
           <el-tag type="info">无效 {{ review.pendingInvalid.length }}</el-tag>
         </div>
+        <!-- 勾选之前先摊开本次采集的质量/类别/距离概况，只读，不参与审核与生成。 -->
+        <CandidateDataSummary
+          :candidates="review.candidates"
+          :discovery="review.profile?.discovery"
+        />
         <div v-if="pendingItems.length" class="batch-review-toolbar">
           <el-checkbox
             :model-value="allPendingSelected"
@@ -136,31 +148,53 @@
           </template>
         </div>
         <div v-if="!reviewQueue.length" class="empty">暂无待审核地点，请检查采集来源或任务警告。</div>
-        <article
-          v-for="item in reviewQueue"
-          :key="item.id"
-          class="candidate-item"
-          :class="{ selected: selected?.id === item.id, approved: item.reviewStatus === 'approved', rejected: item.reviewStatus === 'rejected' }"
-          @click="selectCandidate(item)"
-        >
-          <div class="candidate-title">
-            <div class="candidate-name">
-              <el-checkbox
-                :model-value="selectedPreviewIds.includes(item.id)"
-                :aria-label="`选择 ${item.name}`"
-                @click.stop
-                @change="value => togglePreviewCandidate(item.id, Boolean(value))"
-              />
-              <strong>{{ item.name }}</strong>
-            </div>
-            <el-tag size="small" :type="reviewTagType(item.reviewStatus)">{{ reviewLabel(item.reviewStatus) }}</el-tag>
+        <div v-for="group in candidateGroups" :key="group.key" class="candidate-group">
+          <div class="candidate-group-head" @click="toggleGroup(group.key)">
+            <span class="group-caret" :class="{ open: group.open }">▸</span>
+            <strong>{{ group.label }}</strong>
+            <span class="group-count">{{ group.items.length }}</span>
           </div>
-          <p>{{ item.subCategory }} · {{ item.lng.toFixed(5) }}, {{ item.lat.toFixed(5) }}</p>
-          <div class="candidate-meta">
-            <span>{{ sourceLabel(item.source) }}</span>
-            <span>{{ qualityLabel(item) }} {{ qualityConfidence(item).toFixed(2) }}</span>
-          </div>
-        </article>
+          <template v-if="group.open">
+            <article
+              v-for="item in group.items"
+              :key="item.id"
+              class="candidate-item"
+              :class="{ selected: selected?.id === item.id, approved: item.reviewStatus === 'approved', rejected: item.reviewStatus === 'rejected' }"
+              @click="selectCandidate(item)"
+            >
+              <div class="candidate-title">
+                <div class="candidate-name">
+                  <el-checkbox
+                    :model-value="selectedPreviewIds.includes(item.id)"
+                    :aria-label="`选择 ${item.name}`"
+                    @click.stop
+                    @change="value => togglePreviewCandidate(item.id, Boolean(value))"
+                  />
+                  <strong>{{ item.name }}</strong>
+                </div>
+                <el-tag size="small" :type="reviewTagType(item.reviewStatus)">{{ reviewLabel(item.reviewStatus) }}</el-tag>
+              </div>
+              <p>
+                {{ item.subCategory }} · {{ item.lng.toFixed(5) }}, {{ item.lat.toFixed(5) }}
+                <span v-if="distanceOf(item) !== null"> · 距中心 {{ distanceOf(item) }} m</span>
+              </p>
+              <div class="candidate-meta">
+                <span>{{ sourceLabel(item.source) }}</span>
+                <span>{{ qualityLabel(item) }} {{ qualityConfidence(item).toFixed(2) }}</span>
+              </div>
+              <div v-if="item.userAdded" class="user-poi-actions">
+                <el-tag size="small" type="warning" effect="plain">我添加</el-tag>
+                <el-button
+                  link
+                  type="danger"
+                  size="small"
+                  :loading="removingUserPoiId === item.id"
+                  @click.stop="removeUserPoi(item)"
+                >删除</el-button>
+              </div>
+            </article>
+          </template>
+        </div>
       </div>
 
       <div class="map-panel">
@@ -168,6 +202,9 @@
         <div class="map-toolbar">
           <el-button size="small" :disabled="previewing || (selectedPreviewIds.length < 3)" :loading="previewing" type="primary" @click="buildPreview">
             {{ previewing ? '构建预览中…' : previewReady ? '重新生成临时热图' : '生成临时热图' }}
+          </el-button>
+          <el-button size="small" :type="addMode ? 'warning' : undefined" @click="toggleAddMode">
+            {{ addMode ? '点击地图选位置…' : '手动补点' }}
           </el-button>
           <el-button v-if="reviewToken.trim().length >= 16" size="small" :disabled="publishing || !review.approved.length" :loading="publishing" @click="showPublishPlan">
             查看正式发布变更
@@ -178,16 +215,72 @@
           <el-select v-if="previewScene === 'photo' || previewScene === 'flower_viewing'" v-model="previewSeason" size="small" :disabled="!previewReady" @change="loadPreview">
             <el-option v-for="season in seasons" :key="season.id" :label="season.name" :value="season.id" />
           </el-select>
+          <el-checkbox v-model="showPreviewPoints" size="small">显示已选点位</el-checkbox>
         </div>
         <div v-if="previewReady" class="map-legend">
           <div class="legend-bar" :style="{ background: rampCss }"></div>
           <div class="legend-labels"><span>相对较低</span><span>相对较高</span></div>
-          <p class="legend-note">仅在同一校区、同一场景内比较；边界为数据覆盖范围，通行情况未核实。</p>
+          <p class="legend-note">热力强度来自点位分布与场景相关度，与质量分无关；边界为数据覆盖范围，通行情况未核实。</p>
         </div>
+        <p v-if="addMode" class="map-hint add-hint">在地图上点击系统漏掉的地点即可补点；补点只进入你自己的临时热图，不会写入正式数据。</p>
         <p v-if="!previewReady" class="map-hint">已选择 {{ selectedPreviewIds.length }} 个地点；至少选择 3 个后即可生成你的临时热力图。</p>
         <p v-else class="map-hint preview-success">临时热图已生成，待审核标记已隐藏，可切换场景和季节查看。</p>
         <p v-if="publishPlan" class="publish-hint">正式发布预览：植物新增 {{ publishPlan.plantAdded.length }} / 修改 {{ publishPlan.plantUpdated.length }}，场景新增 {{ publishPlan.sceneAdded.length }} / 修改 {{ publishPlan.sceneUpdated.length }}；发布后需重建索引和热图缓存。</p>
       </div>
+
+      <el-dialog
+        v-model="addDialogVisible"
+        title="手动补一个地点"
+        :width="isMobile ? '92%' : '460px'"
+        append-to-body
+      >
+        <el-form label-position="top">
+          <el-form-item label="地点名称（必填）">
+            <el-input v-model="addForm.name" maxlength="40" show-word-limit placeholder="例如：思源湖西岸草坪" />
+          </el-form-item>
+          <div class="coord-fields">
+            <el-form-item label="经度">
+              <el-input-number v-model="addForm.lng" :precision="6" :step="0.0001" controls-position="right" />
+            </el-form-item>
+            <el-form-item label="纬度">
+              <el-input-number v-model="addForm.lat" :precision="6" :step="0.0001" controls-position="right" />
+            </el-form-item>
+          </div>
+          <el-form-item label="类别">
+            <el-radio-group v-model="addForm.category">
+              <el-radio value="scene">场景</el-radio>
+              <el-radio value="plant">植物</el-radio>
+            </el-radio-group>
+          </el-form-item>
+          <el-form-item label="类型">
+            <el-select
+              v-model="addForm.subCategory"
+              filterable
+              allow-create
+              default-first-option
+              placeholder="可输入自定义类型"
+              style="width: 100%"
+            >
+              <el-option v-for="item in userPoiTypes" :key="item" :label="item" :value="item" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="用于场景">
+            <el-checkbox-group v-model="addForm.scenes">
+              <el-checkbox v-for="scene in userPoiScenes" :key="scene.id" :value="scene.id">{{ scene.name }}</el-checkbox>
+            </el-checkbox-group>
+          </el-form-item>
+          <el-form-item label="补充说明（可选）">
+            <el-input v-model="addForm.text" type="textarea" :rows="2" maxlength="200" show-word-limit placeholder="例如：树下有长椅，傍晚光线好" />
+          </el-form-item>
+        </el-form>
+        <p class="user-poi-note">
+          补点只用于你本次的临时热图，不会写入全站正式数据；管理员在审核面板通过后才会进入正式热图。
+        </p>
+        <template #footer>
+          <el-button @click="addDialogVisible = false">取消</el-button>
+          <el-button type="primary" :loading="adding" :disabled="!addForm.name.trim()" @click="submitUserPoi">加入本次热图</el-button>
+        </template>
+      </el-dialog>
 
       <el-drawer v-model="drawerVisible" title="候选地点审核" :size="drawerSize">
         <template v-if="selected">
@@ -262,11 +355,14 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import { loadAMap } from '../amap';
 import { useIsMobile } from '../composables/useIsMobile';
 import {
+  addCampusUserPoi, removeCampusUserPoi,
   getCampusBuild, getCampusPreview, getCampusReview, submitCampusDiscovery,
   submitCampusPreview, submitCampusSelection, submitCampusReview, getCampusPublishPlan, publishCampusBuild,
-  type BuildJob, type CandidatePoi, type ReviewBundle, type ReviewStatus, type PublishPlan,
+  type BuildJob, type CandidatePoi, type PreviewPlace, type ReviewBundle, type ReviewStatus, type PublishPlan,
+  type UserPoiPayload,
 } from '../api/campusBuild';
 import { getReviewToken, setReviewToken } from '../api/userdata';
+import CandidateDataSummary from '../components/CandidateDataSummary.vue';
 import {
   HEATMAP_LAYER_OPACITY,
   PREVIEW_HEATMAP_OPTIONS,
@@ -300,9 +396,26 @@ const previewing = ref(false);
 const previewReady = ref(false);
 const previewScene = ref('walk');
 const previewSeason = ref('autumn');
+/** 预览生成后默认隐藏候选点，勾选后可对照“点位 ↔ 热斑”是否对齐。 */
+const showPreviewPoints = ref(false);
+const previewPlaces = ref<PreviewPlace[]>([]);
 const publishPlan = ref<PublishPlan | null>(null);
 const publishing = ref(false);
 const drawerVisible = ref(false);
+/** 手动补点：进入该模式后，下一次地图点击会带上坐标并打开表单。 */
+const addMode = ref(false);
+const addDialogVisible = ref(false);
+const adding = ref(false);
+const removingUserPoiId = ref('');
+const addForm = reactive({
+  name: '',
+  lng: 0,
+  lat: 0,
+  category: 'scene' as 'plant' | 'scene',
+  subCategory: '用户标注',
+  scenes: ['walk', 'photo'] as string[],
+  text: '',
+});
 const mapEl = ref<HTMLElement | null>(null);
 /** 抽屉宽度：手机端铺满屏幕，桌面端保持原有 380px */
 const drawerSize = computed(() => (isMobile.value ? '100%' : '380px'));
@@ -318,12 +431,23 @@ const somePendingSelected = computed(() => (
   selectedPreviewIds.value.length > 0 && !allPendingSelected.value
 ));
 const resolvedDiscovery = computed(() => {
-  const discovery = job.value?.discovery;
+  const discovery = job.value?.discovery || review.value?.profile?.discovery || {};
+  const campus = review.value?.profile?.campus;
+  const center = discovery.center || campus?.center;
+  const radius = Number(discovery.radiusMeters ?? campus?.trustRadiusM);
   return {
-    school: discovery?.resolvedSchool || review.value?.profile?.school?.name || review.value?.school || '',
-    campus: discovery?.resolvedCampus || review.value?.profile?.campus?.name || review.value?.campus || '',
-    method: discovery?.method || review.value?.profile?.discovery?.method || '',
-    address: discovery?.address || review.value?.profile?.discovery?.address || '',
+    school: discovery.resolvedSchool || review.value?.profile?.school?.name || review.value?.school || '',
+    campus: discovery.resolvedCampus || campus?.name || review.value?.campus || '',
+    method: discovery.method || '',
+    cleanedQuery: discovery.cleanedQuery || '',
+    centerSource: discovery.centerSource || '',
+    center: Array.isArray(center) && center.length === 2
+      ? `${center[0].toFixed(5)}, ${center[1].toFixed(5)}` : '',
+    radiusMeters: Number.isFinite(radius) && radius > 0 ? radius : 0,
+    radius: Number.isFinite(radius) && radius > 0
+      ? `${Math.round(radius)} m（约 ${(radius / 1000).toFixed(1)} km）` : '',
+    address: discovery.address || '',
+    warning: discovery.warning || '',
   };
 });
 const hasDiscoveryDetails = computed(() => Object.values(resolvedDiscovery.value).some(Boolean));
@@ -344,6 +468,44 @@ const reviewQueue = computed(() => {
     ? [...items, selected.value]
     : items;
 });
+/** 校园相关类型默认展开；商业与配套类型默认折叠，避免几百个候选一次铺满。 */
+const EXPANDED_CATEGORY_GROUPS = new Set([
+  '科教文化服务', '商务住宅', '体育休闲服务', '风景名胜', '医疗保健服务',
+]);
+type CandidateGroup = { key: string; label: string; items: CandidatePoi[]; open: boolean };
+/** 用户自己补的点单独成组，避免混进采集来源的分类里被误当成系统发现。 */
+const USER_POI_GROUP = '我的添加';
+/** 只记录用户手动改动过的分组，未出现的分组按类型默认开合。 */
+const groupOpenState = ref<Record<string, boolean>>({});
+const candidateGroups = computed<CandidateGroup[]>(() => {
+  const buckets = new Map<string, CandidatePoi[]>();
+  for (const item of reviewQueue.value) {
+    const key = item.userAdded
+      ? USER_POI_GROUP
+      : (String(item.subCategory || '').trim() || '未分类');
+    const list = buckets.get(key) || [];
+    list.push(item);
+    buckets.set(key, list);
+  }
+  return [...buckets.entries()]
+    .map(([key, items]) => ({
+      key,
+      label: key,
+      items,
+      open: groupOpenState.value[key]
+        ?? (key === USER_POI_GROUP || EXPANDED_CATEGORY_GROUPS.has(key)),
+    }))
+    .sort((left, right) => (
+      Number(right.key === USER_POI_GROUP) - Number(left.key === USER_POI_GROUP)
+      || Number(!EXPANDED_CATEGORY_GROUPS.has(left.key)) - Number(!EXPANDED_CATEGORY_GROUPS.has(right.key))
+      || right.items.length - left.items.length
+      || left.key.localeCompare(right.key, 'zh-Hans-CN')
+    ));
+});
+const toggleGroup = (key: string) => {
+  const group = candidateGroups.value.find(item => item.key === key);
+  groupOpenState.value = { ...groupOpenState.value, [key]: !(group?.open ?? false) };
+};
 const evidenceText = computed(() => {
   const evidence = selected.value?.evidence;
   if (!evidence) return '暂无结构化证据';
@@ -363,6 +525,7 @@ const qualityScoreEntries = computed(() => allScoreEntries.value.filter(entry =>
 const riskScoreEntries = computed(() => allScoreEntries.value.filter(entry => isRiskScore(entry.key)));
 
 const scenes = [
+  { id: 'density', name: '点位密度' },
   { id: 'walk', name: '散步休息' }, { id: 'date', name: '浪漫约会' },
   { id: 'photo', name: '拍照' }, { id: 'flower_viewing', name: '赏花' },
 ];
@@ -370,17 +533,38 @@ const seasons = [
   { id: 'spring', name: '春季' }, { id: 'summer', name: '夏季' },
   { id: 'autumn', name: '秋季' }, { id: 'winter', name: '冬季' },
 ];
+/** 补点表单的可选项：只列校园里最常见、最能被热图吸收的类型，仍允许自定义输入。 */
+const userPoiTypes = [
+  '湖泊', '河岸', '草坪', '亭子', '桥', '广场', '校门', '雕塑',
+  '花园', '建筑', '运动场', '体育场', '纪念馆', '食堂', '咖啡',
+];
+const userPoiScenes = [
+  { id: 'walk', name: '散步休息' }, { id: 'date', name: '浪漫约会' },
+  { id: 'photo', name: '拍照' }, { id: 'flower_viewing', name: '赏花' },
+];
 let timer: number | null = null;
 let map: any = null;
 let markers: any[] = [];
+let peakMarkers: any[] = [];
+let scopeCircle: any = null;
 let heatLayer: any = null;
 
 const statusLabel = (value?: string) => ({ queued: '排队中', running: '采集中', completed: '待审核', blocked: '已阻塞', failed: '失败' }[value || ''] || value || '未知');
 const webSearchLabel = (value?: string) => ({ not_requested: '未请求', unconfigured: '未配置', completed: '已完成', empty: '无结果', failed: '失败' }[value || ''] || value || '未知');
 const stageLabel = (value?: string) => ({ harvest: '采集来源', normalize: '整理候选', complete: '等待审核', failed: '失败' }[value || ''] || value || '准备中');
 const discoveryMethodLabel = (value?: string) => ({ local_config: '本地校区配置', amap_geocode: '高德地理编码' }[value || ''] || value || '未返回');
+const centerSourceLabel = (value?: string) => ({ local_config: '本地校区配置', amap_poi: '高德 POI 校正', amap_geocode: '高德地理编码' }[value || ''] || value || '未返回');
+const distanceOf = (item: CandidatePoi) => {
+  const value = Number((item.evidence as Record<string, unknown> | undefined)?.distanceMeters);
+  return Number.isFinite(value) ? Math.round(value) : null;
+};
 const themeLabel = (value?: string) => ({ walk: '散步', date: '约会', photo: '拍照', flower: '赏花', study: '学习', food: '餐饮', general: '综合' }[value || ''] || value || '综合');
-const sourceLabel = (value?: string) => ({ amap: '高德 POI', amap_plant: '高德植物候选', amap_scene: '高德场景候选', public_web: '公开网页', public_web_plant: '网页植物证据', public_web_scene: '网页场景证据', campus_registry: '已登记植物', scene_registry: '已登记场景', json: 'JSON 来源' }[value || ''] || value || '未知来源');
+/** 混合/综合请求用点位密度；主题类请求保持原有四类场景。 */
+const previewSceneForTheme = (theme?: string) => {
+  if (!theme || theme === 'general') return 'density';
+  return ({ walk: 'walk', date: 'date', photo: 'photo', flower: 'flower_viewing' } as Record<string, string>)[theme] || 'walk';
+};
+const sourceLabel = (value?: string) => ({ amap: '高德 POI', amap_plant: '高德植物候选', amap_scene: '高德场景候选', public_web: '公开网页', public_web_plant: '网页植物证据', public_web_scene: '网页场景证据', campus_registry: '已登记植物', scene_registry: '已登记场景', manual: '用户手工添加', json: 'JSON 来源' }[value || ''] || value || '未知来源');
 const reviewLabel = (value: ReviewStatus) => ({ pending: '待审', approved: '已通过', rejected: '已拒绝' }[value]);
 const statusType = (value?: string) => value === 'failed' || value === 'blocked' ? 'danger' : value === 'completed' ? 'success' : 'warning';
 const reviewTagType = (value: ReviewStatus) => value === 'approved' ? 'success' : value === 'rejected' ? 'danger' : 'warning';
@@ -430,20 +614,63 @@ const scoreColor = (value: number, risk: boolean) => {
   return strength >= 0.7 ? '#67c23a' : strength >= 0.4 ? '#e6a23c' : '#f56c6c';
 };
 
+const escapeHtml = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, (char) => (
+  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char] || char
+));
 const clearMarkers = () => { markers.forEach(marker => marker.setMap(null)); markers = []; };
+const clearPeaks = () => { peakMarkers.forEach(marker => marker.setMap(null)); peakMarkers = []; };
+const clearScope = () => { if (scopeCircle && map) map.remove(scopeCircle); scopeCircle = null; };
+/** 搜索范围圆：让“点位为什么会被收进来”在图上可解释。 */
+const renderScope = () => {
+  clearScope();
+  if (!map) return;
+  const center = review.value?.profile?.campus?.center;
+  const radius = Number(resolvedDiscovery.value.radiusMeters);
+  if (!Array.isArray(center) || center.length !== 2 || !Number.isFinite(radius) || radius <= 0) return;
+  const AMap = (window as any).AMap;
+  scopeCircle = new AMap.Circle({
+    center, radius, strokeColor: '#409eff', strokeWeight: 1.5,
+    strokeOpacity: 0.9, strokeStyle: 'dashed', fillOpacity: 0, zIndex: 70,
+  });
+  map.add(scopeCircle);
+};
+/** Top 热区峰值点：让热斑有名字，避免只看到一层颜色。 */
+const renderPeaks = () => {
+  clearPeaks();
+  if (!map || !previewReady.value) return;
+  const AMap = (window as any).AMap;
+  previewPlaces.value.forEach((place, index) => {
+    if (!Number.isFinite(place.lng) || !Number.isFinite(place.lat)) return;
+    const label = escapeHtml(place.name || '热区');
+    const marker = new AMap.Marker({
+      map, position: [place.lng, place.lat], zIndex: 95, offset: new AMap.Pixel(-10, -10),
+      content: `<div style="display:flex;align-items:center;gap:5px;padding:2px 7px;border-radius:11px;`
+        + `background:#fff;border:1px solid #e6a23c;color:#8a5a00;font-size:12px;line-height:18px;`
+        + `white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.18)">`
+        + `<b style="font-weight:600">${label}</b>`
+        + `<span style="display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;`
+        + `border-radius:50%;background:#e6a23c;color:#fff;font-size:10px">${index + 1}</span></div>`,
+    });
+    peakMarkers.push(marker);
+  });
+};
 const renderMarkers = () => {
   if (!map || !review.value) return;
   clearMarkers();
-  // 预览只展示已通过地点生成的热图。待审核候选没有参与计算，
-  // 继续显示会遮挡热图，也容易让人误以为它们已被采用。
-  if (previewReady.value) return;
+  // 预览默认隐藏候选点（避免遮挡热图）；勾选“显示已选点位”后只显示
+  // 真正参与本次计算的已选点，方便核对点位与热斑是否对齐。
+  if (previewReady.value && !showPreviewPoints.value) return;
   const AMap = (window as any).AMap;
+  const items = previewReady.value
+    ? reviewQueue.value.filter(item => selectedPreviewIds.value.includes(item.id))
+    : reviewQueue.value;
   // 已登记地点可能有数千条，全部创建带标签 Marker 会阻塞页面并掩盖热图。
-  // 地图仅展示需要审核的新候选，已通过数据由热图图层呈现。
-  reviewQueue.value.forEach(item => {
-    const color = item.reviewStatus === 'approved' ? '#67c23a' : item.reviewStatus === 'rejected' ? '#909399' : '#c20a1c';
+  items.forEach(item => {
+    const color = item.userAdded ? '#e6a23c'
+      : item.reviewStatus === 'approved' ? '#67c23a' : item.reviewStatus === 'rejected' ? '#909399' : '#c20a1c';
     const marker = new AMap.Marker({ map, position: [item.lng, item.lat], title: item.name,
-      label: { content: item.name, direction: 'top', offset: new AMap.Pixel(0, -4) },
+      label: previewReady.value ? undefined
+        : { content: item.name, direction: 'top', offset: new AMap.Pixel(0, -4) },
       icon: new AMap.Icon({ image: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="26" height="34"><path fill="${color}" d="M13 0C6 0 1 5 1 12c0 9 12 22 12 22s12-13 12-22C25 5 20 0 13 0z"/><circle cx="13" cy="12" r="5" fill="white"/></svg>`)}`, size: new AMap.Size(26, 34), imageSize: new AMap.Size(26, 34) }),
     });
     marker.on('click', () => selectCandidate(item));
@@ -455,6 +682,8 @@ const initMap = async () => {
   try {
     const AMap = await loadAMap();
     map = new AMap.Map(mapEl.value, { zoom: 15, center: [121.453725, 31.03148] });
+    map.on('click', onMapClick);
+    renderScope();
     renderMarkers();
   } catch (err) { error.value = err instanceof Error ? err.message : '地图加载失败'; }
 };
@@ -462,7 +691,11 @@ const initMap = async () => {
 // 热力图任务切换时，旧的 review 区域会被 Vue 卸载并重新创建。
 // 先销毁旧 AMap 实例，否则 initMap 会误以为地图已存在，导致新容器保持空白。
 const disposeMap = () => {
+  addMode.value = false;
+  addDialogVisible.value = false;
   clearMarkers();
+  clearPeaks();
+  clearScope();
   clearHeatmap();
   try { map?.destroy?.(); } catch { /* 地图实例已被 DOM 卸载时忽略销毁异常 */ }
   map = null;
@@ -474,6 +707,93 @@ const selectCandidate = (item: CandidatePoi) => {
   drawerVisible.value = true;
   map?.setCenter?.([item.lng, item.lat]);
 };
+const resetAddForm = () => {
+  addForm.name = '';
+  addForm.text = '';
+  addForm.subCategory = '用户标注';
+  addForm.category = 'scene';
+  addForm.scenes = ['walk', 'photo'];
+};
+
+const toggleAddMode = () => {
+  if (!map) { ElMessage.warning('地图尚未加载完成，请稍后再试'); return; }
+  addMode.value = !addMode.value;
+  if (addMode.value) ElMessage.info('请在地图上点击系统漏掉的地点');
+};
+
+/** 只有处于补点模式时才响应地图点击，避免和选点、预览操作互相干扰。 */
+const onMapClick = (event: any) => {
+  if (!addMode.value) return;
+  const lnglat = event?.lnglat;
+  const lng = Number(typeof lnglat?.getLng === 'function' ? lnglat.getLng() : lnglat?.lng);
+  const lat = Number(typeof lnglat?.getLat === 'function' ? lnglat.getLat() : lnglat?.lat);
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return;
+  addForm.lng = Number(lng.toFixed(6));
+  addForm.lat = Number(lat.toFixed(6));
+  addMode.value = false;
+  addDialogVisible.value = true;
+};
+
+/** 补点会改变热图输入：旧预览必须作废，前端和后端状态一起清掉。 */
+const markPreviewStale = () => {
+  previewReady.value = false;
+  if (job.value) job.value.previewStatus = 'stale';
+  publishPlan.value = null;
+  clearHeatmap();
+};
+
+const submitUserPoi = async () => {
+  if (!job.value) return;
+  const name = addForm.name.trim();
+  if (!name) { ElMessage.warning('请填写地点名称'); return; }
+  adding.value = true; error.value = '';
+  try {
+    const payload: UserPoiPayload = {
+      name,
+      lng: addForm.lng,
+      lat: addForm.lat,
+      category: addForm.category,
+      subCategory: addForm.subCategory.trim() || '用户标注',
+      scenes: addForm.scenes,
+      text: addForm.text.trim(),
+    };
+    const result = await addCampusUserPoi(job.value.id, payload);
+    addDialogVisible.value = false;
+    resetAddForm();
+    markPreviewStale();
+    await loadReview();
+    renderMarkers();
+    ElMessage.success(`已加入本次热图（共 ${result.count} 个补点），重新生成临时热图后生效`);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : '补点失败';
+    error.value = message;
+    ElMessage.error(message);
+  } finally { adding.value = false; }
+};
+
+const removeUserPoi = async (item: CandidatePoi) => {
+  if (!job.value) return;
+  try {
+    await ElMessageBox.confirm(
+      `确认删除手动添加的「${item.name}」吗？它只会从本次热图中移除。`,
+      '删除补点',
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' },
+    );
+  } catch { return; }
+  removingUserPoiId.value = item.id;
+  try {
+    await removeCampusUserPoi(job.value.id, item.id);
+    markPreviewStale();
+    await loadReview();
+    renderMarkers();
+    ElMessage.success('已删除补点');
+  } catch (err) {
+    const message = err instanceof Error ? err.message : '删除补点失败';
+    error.value = message;
+    ElMessage.error(message);
+  } finally { removingUserPoiId.value = ''; }
+};
+
 const loadReview = async () => {
   if (!job.value?.id) return;
   loadingReview.value = true;
@@ -487,6 +807,7 @@ const loadReview = async () => {
     await nextTick();
     await initMap();
     if (review.value.profile?.campus?.center) map?.setCenter(review.value.profile.campus.center);
+    renderScope();
     renderMarkers();
   } catch (err) { error.value = err instanceof Error ? err.message : '候选读取失败'; }
   finally { loadingReview.value = false; }
@@ -515,7 +836,7 @@ const submit = async () => {
       includeWeb: includeWeb.value,
       autoSearch: autoSearch.value,
     });
-    previewScene.value = ({ walk: 'walk', date: 'date', photo: 'photo', flower: 'flower_viewing' } as Record<string, string>)[result.theme] || 'walk';
+    previewScene.value = previewSceneForTheme(result.theme);
     jobInput.value = result.jobId;
     job.value = {
       success: true, id: result.jobId, status: 'queued', theme: result.theme,
@@ -536,7 +857,7 @@ const loadExisting = async () => {
   error.value = ''; job.value = null; review.value = null; previewReady.value = false;
   try {
     job.value = await getCampusBuild(jobInput.value.trim());
-    previewScene.value = ({ walk: 'walk', date: 'date', photo: 'photo', flower: 'flower_viewing' } as Record<string, string>)[job.value.theme || ''] || 'walk';
+    previewScene.value = previewSceneForTheme(job.value.theme);
     previewReady.value = job.value.previewStatus === 'completed';
     if (job.value.status === 'completed') {
       await loadReview();
@@ -654,7 +975,11 @@ const buildPreview = async () => {
   } catch (err) { error.value = err instanceof Error ? err.message : '预览构建失败'; }
   finally { previewing.value = false; }
 };
-const clearHeatmap = () => { if (heatLayer && map) map.remove(heatLayer); heatLayer = null; };
+const clearHeatmap = () => {
+  if (heatLayer && map) map.remove(heatLayer);
+  heatLayer = null;
+  clearPeaks();
+};
 const loadPreview = async () => {
   if (!job.value || !previewReady.value) return;
   try {
@@ -670,11 +995,36 @@ const loadPreview = async () => {
     const canvas = renderHeatmapCanvas(grid, PREVIEW_HEATMAP_OPTIONS);
     if (!canvas) throw new Error('当前浏览器不支持热力图渲染');
     clearHeatmap();
-    const AMap = (window as any).AMap; heatLayer = new AMap.ImageLayer({ url: canvas.toDataURL('image/png'), bounds: grid.bounds, zooms: [3, 22], opacity: HEATMAP_LAYER_OPACITY, zIndex: 80 }); map.add(heatLayer);
-  } catch (err) { error.value = err instanceof Error ? err.message : '预览读取失败'; }
+    const AMap = (window as any).AMap;
+    // 用显式 AMap.Bounds 而不是扁平数组，避免不同版本对 [w,s,e,n] 的解释差异。
+    const bounds = new AMap.Bounds(
+      [grid.bounds[0], grid.bounds[1]],
+      [grid.bounds[2], grid.bounds[3]],
+    );
+    heatLayer = new AMap.ImageLayer({
+      url: canvas.toDataURL('image/png'), bounds, zooms: [3, 22],
+      opacity: HEATMAP_LAYER_OPACITY, zIndex: 80,
+    });
+    map.add(heatLayer);
+    // 自动框住热区，避免用户停在校园中心却看不到外围热斑。
+    map.setBounds(bounds);
+    previewPlaces.value = Array.isArray(result.preview.places) ? result.preview.places : [];
+    renderPeaks();
+    renderMarkers();
+  } catch (err) {
+    // 旧任务没有 density 缓存：自动退回散步场景，而不是把页面留在报错态。
+    if (previewScene.value === 'density') {
+      previewScene.value = 'walk';
+      ElMessage.info('该任务没有点位密度缓存，已切换到散步场景');
+      await loadPreview();
+      return;
+    }
+    error.value = err instanceof Error ? err.message : '预览读取失败';
+  }
 };
 onMounted(initMap);
 watch(() => review.value?.candidates, renderMarkers, { deep: true });
+watch(showPreviewPoints, renderMarkers);
 // 高德地图实例不会感知容器的"非窗口"尺寸变化（侧栏折叠、断点切换、旋转屏幕后的重排），
 // 容器尺寸变化时补一次重排；容器随 review 被 v-if 卸载时自动解绑。
 let mapResizeObserver: ResizeObserver | null = null;
@@ -714,6 +1064,7 @@ onBeforeUnmount(() => {
 .discovery-details dl div { display: flex; min-width: 170px; gap: 6px; }
 .discovery-details dt { color: #909399; }
 .discovery-details dd { margin: 0; color: #303133; word-break: break-word; }
+.discovery-warning { margin: 8px 0 0; color: #b45309; font-size: 12px; line-height: 1.5; }
 .zero-candidate-help { margin-top: 10px; padding: 10px 12px; border: 1px solid #fab6b6; border-radius: 8px; background: #fef0f0; color: #b42318; font-size: 12px; line-height: 1.55; }
 .zero-candidate-help ul { margin: 5px 0 0; padding-left: 18px; }
 .zero-candidate-help p { margin-top: 5px; }
@@ -721,10 +1072,20 @@ onBeforeUnmount(() => {
 .job-summary { flex-wrap: wrap; color: #606266; font-size: 13px; } .job-summary div { padding-right: 16px; border-right: 1px solid #ebeef5; } .job-summary div:last-child { border-right: 0; } .job-summary span { color: #909399; margin-right: 5px; } code { color: #909399; font-size: 11px; }
 .workspace { display: grid; grid-template-columns: minmax(320px, 430px) minmax(0, 1fr); min-width: 0; gap: 14px; min-height: 560px; } .candidate-panel { min-width: 0; overflow: auto; max-height: 680px; } .panel-head { justify-content: space-between; align-items: flex-start; } .review-stats { margin: 14px 0 8px; }
 .batch-review-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 9px 10px; margin-bottom: 8px; border: 1px solid #d9ecff; border-radius: 8px; background: #f4f9ff; } .batch-review-toolbar > span { margin-right: auto; color: #606266; font-size: 12px; }
+/* 候选按高德大类分组：校园相关类型默认展开，商业/配套默认折叠。 */
+.candidate-group-head { display: flex; align-items: center; gap: 6px; margin: 10px 0 2px; padding: 5px 8px; border-radius: 6px; background: #f5f7fa; color: #606266; font-size: 12px; cursor: pointer; user-select: none; }
+.candidate-group-head:hover { background: #eef1f6; }
+.candidate-group-head strong { flex: 1; color: #303133; font-size: 12px; font-weight: 600; }
+.group-count { color: #909399; font-variant-numeric: tabular-nums; }
+.group-caret { display: inline-block; color: #c0c4cc; transition: transform .15s; }
+.group-caret.open { transform: rotate(90deg); }
 .candidate-item { padding: 11px 10px; margin: 8px 0; border: 1px solid #ebeef5; border-left: 4px solid #e6a23c; border-radius: 9px; cursor: pointer; transition: .15s; } .candidate-item:hover, .candidate-item.selected { background: #fff8f1; border-color: #e6a23c; } .candidate-item.approved { border-left-color: #67c23a; } .candidate-item.rejected { border-left-color: #909399; opacity: .7; } .candidate-title { display: flex; justify-content: space-between; gap: 8px; } .candidate-item p, .candidate-meta { color: #909399; font-size: 12px; margin-top: 5px; } .candidate-meta { display: flex; justify-content: space-between; }
 .candidate-name { display: flex; align-items: flex-start; min-width: 0; gap: 8px; } .candidate-name strong { overflow-wrap: anywhere; }
 .map-panel { position: relative; min-width: 0; min-height: 560px; padding: 0; overflow: hidden; } .map { width: 100%; height: 100%; min-height: 560px; } .map-toolbar { position: absolute; z-index: 3; left: 12px; right: 12px; top: 12px; flex-wrap: wrap; width: fit-content; max-width: calc(100% - 24px); box-sizing: border-box; padding: 8px; border-radius: 9px; background: rgba(255,255,255,.95); box-shadow: 0 3px 12px #0002; } .map-hint { position: absolute; left: 12px; right: 12px; bottom: 12px; width: fit-content; max-width: calc(100% - 24px); box-sizing: border-box; padding: 7px 10px; background: rgba(255,255,255,.92); color: #909399; font-size: 12px; border-radius: 7px; }
 .preview-success { color: #529b2e; } .publish-hint { position: absolute; left: 12px; bottom: 44px; padding: 7px 10px; background: rgba(255,248,230,.95); color: #b88230; font-size: 12px; border-radius: 7px; }
+.add-hint { bottom: 76px; color: #b88230; background: rgba(255,248,230,.95); }
+.user-poi-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 6px; }
+.user-poi-note { margin: 0; color: #909399; font-size: 12px; line-height: 1.55; }
 /* 临时热图图例：颜色含义此前无从得知，这里补齐（渐变与栅格同源）。 */
 .map-legend { position: absolute; right: 12px; bottom: 12px; z-index: 3; width: min(240px, 46%); box-sizing: border-box; padding: 8px 10px; border-radius: 8px; background: rgba(255,255,255,.94); box-shadow: 0 3px 12px #0002; }
 .legend-bar { height: 9px; border-radius: 4px; }

@@ -135,10 +135,74 @@ def _boundary_evidence_score(evidence: dict) -> float:
     return 0.15
 
 
+# 高德 POI 大类 → 混合/通用主题下的基础相关度。
+# 这是"该类地点与校园场景的关系"，不是对具体地点的猜测：院系、楼栋、校医院、
+# 停车场混在同一批候选里时，旧逻辑会给它们同一个分，审核列表和热图都没有层次。
+_AMAP_CATEGORY_RELEVANCE = {
+    "风景名胜": 0.92,
+    "体育休闲服务": 0.88,
+    "科教文化服务": 0.82,
+    "餐饮服务": 0.72,
+    "商务住宅": 0.62,
+    "医疗保健服务": 0.6,
+    "政府机构及社会团体": 0.5,
+    "购物服务": 0.44,
+    "交通设施服务": 0.4,
+    "生活服务": 0.38,
+}
+
+# 名称里出现这些词说明它本身就是可参观/可停留的设施，反之是配套或通过性设施。
+_SCENIC_NAME_TERMS = (
+    "学院", "学部", "系", "研究院", "研究所", "实验室", "图书馆", "博物馆",
+    "体育馆", "体育场", "游泳馆", "礼堂", "中心", "湖", "园", "亭", "桥",
+    "广场", "校门", "大门", "纪念",
+)
+_PASSIVE_NAME_TERMS = (
+    "停车场", "停车库", "充电站", "便利店", "快递", "驿站", "公共厕所",
+    "出入口", "宿舍", "家属", "公寓",
+)
+
+
+def _amap_category_relevance(candidate: dict, evidence: dict) -> float | None:
+    """按高德类型码给出基础相关度；非高德来源返回 ``None``。"""
+    amap_type = str(evidence.get("type") or "")
+    category = str(candidate.get("subCategory") or "").strip()
+    if not category and amap_type:
+        category = amap_type.split(";")[0]
+    if not category:
+        return None
+    base = _AMAP_CATEGORY_RELEVANCE.get(category)
+    if base is None:
+        if amap_type:
+            category = amap_type.split(";")[0].strip()
+            base = _AMAP_CATEGORY_RELEVANCE.get(category)
+    if base is None:
+        return None
+    name = str(candidate.get("name") or "")
+    if any(term in name for term in _PASSIVE_NAME_TERMS):
+        base -= 0.1
+    elif any(term in name for term in _SCENIC_NAME_TERMS):
+        base += 0.06
+    return round(max(0.0, min(1.0, base)), 4)
+
+
 def _theme_relevance_score(candidate: dict, evidence: dict, theme: str | None) -> float:
     scenes = {value.strip().lower() for value in _strings(candidate.get("scenes"))}
     text = _candidate_text(candidate, evidence)
     requested = str(theme or "").strip().lower()
+    if requested in {"general", "mixed"}:
+        # 混合请求没有单一场景可对齐；旧口径一律给 0.2，导致整批点位同分、
+        # 审核列表无法排序。改为按"是否有采集证据"分档。
+        if evidence.get("sceneFilter") or evidence.get("plantFilter"):
+            return 0.9
+        by_category = _amap_category_relevance(candidate, evidence)
+        if by_category is not None:
+            return by_category
+        if scenes:
+            return 0.78
+        if str(candidate.get("category") or "").lower() == "plant":
+            return 0.65
+        return 0.55
     if requested:
         aliases = _THEME_ALIASES.get(requested, (requested,))
         if requested in scenes or any(alias in scenes for alias in aliases):

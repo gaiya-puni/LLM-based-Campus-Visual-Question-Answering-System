@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import os
 import re
@@ -17,8 +18,9 @@ from typing import Callable
 
 import requests
 
-from .harvest import (AmapPoiHarvester, HarvestCache, Harvester, HarvestResult,
-                       PublicWebHarvester)
+from .boundary import covering_radius_m, distance_m
+from .harvest import (AmapGridTypeHarvester, AmapPoiHarvester, HarvestCache, Harvester,
+                       HarvestResult, PublicWebHarvester)
 from .outbound import direct_proxies
 from .profile import validate_profile
 from .web_search import WebSearchClient
@@ -26,6 +28,8 @@ from .web_search import WebSearchClient
 
 _ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_CAMPUSES = _ROOT / "webapp" / "backend" / "campuses.json"
+
+logger = logging.getLogger(__name__)
 
 
 # AMap and public pages normally use the official school name without a city
@@ -61,9 +65,94 @@ _SCHOOL_CAMPUS_LABELS = {
     ("复旦大学", "本部校区"): "邯郸校区",
 }
 
-_UNIVERSITY_NAME_RE = re.compile(r"[\u4e00-\u9fffA-Za-z·]{2,32}?大学")
-_COLLEGE_NAME_RE = re.compile(r"[\u4e00-\u9fffA-Za-z·]{2,32}?学院")
 _CAMPUS_NAME_RE = re.compile(r"[\u4e00-\u9fffA-Za-z0-9·-]{1,24}?校区")
+
+# 未登记学校的默认采集半径。旧实现固定 2000m，会把校园外的点位也收进来，
+# 表现为"点云比真实校园大一圈"；收紧后由页面明确展示搜索范围。
+DEFAULT_DISCOVERY_RADIUS_M = 1200
+MIN_DISCOVERY_RADIUS_M = 300
+MAX_DISCOVERY_RADIUS_M = 3000
+
+#: 请求前缀：礼貌语、人称与意图动词，允许任意组合并重复剥离。
+#: 只在字符串开头匹配，且剥完至少保留 2 个字符，避免误伤正式校名。
+_REQUEST_PREFIX_TOKENS = (
+    "麻烦您", "麻烦你", "麻烦", "请问您", "请问", "请您", "请", "你好", "您",
+    "帮我", "帮忙", "给我", "替我", "为我", "我想要", "我需要", "我想", "我要",
+    "能不能", "可以", "能否", "请你", "你", "我",
+)
+_REQUEST_ACTION_TOKENS = (
+    "搜索一下", "查询一下", "查找一下", "搜一下", "找一下",
+    "搜索", "查询", "查找", "采集", "获取", "抓取", "统计", "分析",
+    "生成", "制作", "生产", "创建", "绘制", "构建", "显示", "展示",
+    "搜", "找", "画", "做",
+)
+
+#: 机构名左侧的天然边界。取窗口内"最后一个边界之后"的子串作为候选校名，
+#: 这样 "你给我搜索北京大学" 只会留下 "北京大学"。
+_LEFT_BOUNDARY_TOKENS = tuple(sorted({
+    "，", "。", "；", "：", "、", ",", ".", ";", ":", "！", "？", "!", "?",
+    "（", "(", "）", ")", "“", "”", "\"", "《", "》", " ", "\t", "\n",
+    "搜索一下", "查询一下", "查找一下", "搜一下", "找一下",
+    "搜索", "查询", "查找", "采集", "获取", "抓取", "统计", "分析",
+    "生成", "制作", "生产", "创建", "绘制", "构建", "显示", "展示",
+    "麻烦", "请问", "请您", "请", "帮我", "帮忙", "给我", "替我", "为我",
+    "我想要", "我需要", "我想", "我要", "能不能", "可以", "能否",
+    "位于", "关于", "针对", "在", "去", "到", "从", "往", "离",
+    "与", "和", "及", "的", "你", "我", "搜", "找", "画", "做",
+}, key=len, reverse=True))
+
+#: 机构名里不可能出现的请求词（命中即判为噪声）。
+_INSTITUTION_NOISE_RE = re.compile(
+    r"请|帮|麻烦|搜索|查询|查找|采集|获取|统计|分析|生成|制作|绘制|构建|"
+    r"热力图|热度图|分布图|地点|景点|场所|校园|一下|所有|全部|相关|附近|周边|"
+    r"你|我"
+)
+
+#: "大学城 / 大学路 / 大学生" 不是学校名，命中后缀后一个字符即跳过。
+_INSTITUTION_TAIL_STOP = frozenset("城路道街桥门生苑区")
+
+#: 显式类别词。用户写了什么就采什么，避免被默认主题词挤掉。
+_REQUEST_CATEGORY_SYNONYMS = (
+    ("建筑", ("建筑物", "建筑群", "楼宇", "大楼", "教学楼", "实验楼", "建筑")),
+    ("地标建筑", ("地标建筑", "标志性建筑", "地标")),
+    ("树木", ("花草树木", "花木", "乔木", "树木", "植被", "绿植")),
+    ("植物", ("植物", "花草")),
+    ("绿化", ("绿化",)),
+    ("亭子", ("亭子", "凉亭")),
+    ("河岸", ("河岸", "河畔", "水岸", "湖边", "湖畔", "河边")),
+    ("运动场", ("运动场", "操场", "田径场", "足球场")),
+    ("体育馆", ("体育馆", "游泳馆", "健身中心")),
+    ("图书馆", ("图书馆",)),
+    ("食堂", ("食堂", "餐厅")),
+    ("咖啡店", ("咖啡店", "咖啡厅", "咖啡馆", "咖啡")),
+    ("湖泊", ("湖泊", "水景", "湖")),
+    ("桥", ("桥",)),
+    ("校门", ("校门", "大门", "正门")),
+    ("广场", ("广场",)),
+    ("雕塑", ("雕塑", "雕像")),
+    ("花园", ("花园", "园林")),
+    ("草坪", ("草坪", "绿地")),
+    ("步道", ("步道", "小径")),
+    ("樱花", ("樱花",)),
+    ("银杏", ("银杏",)),
+    ("梅花", ("梅花",)),
+    ("荷花", ("荷花", "荷塘")),
+    ("桂花", ("桂花",)),
+)
+
+_THEME_INTENTS = {
+    "date": ("约会", "情侣", "浪漫", "二人世界"),
+    "walk": ("散步", "遛弯", "走走", "漫步", "放松"),
+    "photo": ("拍照", "摄影", "出片", "拍摄"),
+    "flower": ("赏花", "看花", "花季", "花期", "樱花", "银杏", "梅花", "荷花", "桂花"),
+    "study": ("学习", "自习", "安静"),
+    "food": ("吃饭", "美食", "餐厅", "食堂", "咖啡"),
+}
+
+#: 半径写法："500米"、"1.5公里"、"2km 内"。单位按长到短匹配，避免 "km" 被 "k" 截断。
+_RADIUS_RE = re.compile(
+    r"(?<!\d)(\d+(?:\.\d+)?)\s*(公里|千米|km|KM|Km|k|米|m|M)(?:以内|之内|范围内|内)?"
+)
 
 
 @dataclass(frozen=True)
@@ -300,16 +389,16 @@ def _registry_paths(profile: dict, primary: Path) -> list[Path]:
 
 
 def infer_theme(query: str) -> str:
+    """按"显式意图词"判定主题；多个类别并列时归为 general。
+
+    旧实现只要文本含单字"花"就判赏花，导致"花草树木 + 建筑 + 地标"这类混合请求
+    被强行套进赏花场景，热图里只剩一层与点位无关的淡色。
+    """
     text = str(query or "").lower()
-    for theme, words in {
-        "date": ("约会", "情侣", "浪漫"),
-        "walk": ("散步", "遛弯", "走走", "休息", "放松"),
-        "photo": ("拍照", "摄影", "出片"),
-        "flower": ("赏花", "花", "樱花", "银杏"),
-        "study": ("学习", "自习", "安静"),
-        "food": ("吃饭", "美食", "餐厅", "食堂"),
-    }.items():
-        if any(word in text for word in words):
+    if not text:
+        return "general"
+    for theme in ("date", "walk", "photo", "flower", "study", "food"):
+        if any(word in text for word in _THEME_INTENTS[theme]):
             return theme
     return "general"
 
@@ -332,8 +421,140 @@ def _finite_location(value):
     return None
 
 
+def _name_key(value) -> str:
+    """比较用地名键：去空白/间隔符/括号，统一小写。"""
+    return re.sub(r"[\s·•・()（）\[\]【】_\-]+", "", str(value or "")).lower()
+
+
+def _address_contains(address, term) -> bool:
+    """地理编码地址里是否真的出现了这个词（防止"海淀校区"被编码到同名行政区）。"""
+    key = _name_key(term)
+    return bool(key) and key in _name_key(address)
+
+
+def _pick_poi_location(pois, school: str, campus_label: str = "") -> dict | None:
+    """从高德 place/text 结果里挑一个可信的学校/校区点位。
+
+    只接受与校名对齐、且不是附属中学/小学/分校的点位；`fullCampus=True` 表示
+    命中了"学校+校区"的完整名称，可作为校区存在性的证据。
+    """
+    target_school = _name_key(school)
+    target_full = _name_key(f"{school}{campus_label}") if campus_label else ""
+    best = None
+    for poi in pois or []:
+        if not isinstance(poi, dict):
+            continue
+        name = _name_key(poi.get("name"))
+        center = _finite_location(poi.get("location"))
+        if not name or not center:
+            continue
+        if any(term in name for term in ("附属", "中学", "小学", "幼儿园", "分校")):
+            continue
+        full_campus = bool(target_full) and name == target_full
+        if full_campus:
+            score = 4.0
+        elif name == target_school:
+            score = 3.0
+        elif target_full and name.startswith(target_full):
+            score = 2.0
+        elif name.startswith(target_school):
+            score = 1.0
+        else:
+            continue
+        if "高等院校" in str(poi.get("type") or ""):
+            score += 0.5
+        if best is None or score > best["score"]:
+            best = {"score": score, "center": center,
+                    "name": str(poi.get("name") or ""), "fullCampus": full_campus}
+    return best
+
+
+def _strip_request_prefix(text: str) -> str:
+    """反复剥离礼貌语、人称与意图动词前缀；只在字符串开头匹配。
+
+    "请你给我搜索北京大学…" 会依次剥掉 请 → 你 → 给我 → 搜索，只留下真正的请求内容。
+    每步都要求剩余内容至少 2 个字符，避免把校名本身吃掉。
+    """
+    value = str(text or "").strip()
+    tokens = _REQUEST_PREFIX_TOKENS + _REQUEST_ACTION_TOKENS
+    for _ in range(12):
+        original = value
+        value = value.lstrip(" \t\r\n，,、:：;；。.!！?？-")
+        for token in tokens:
+            if value.startswith(token) and len(value) >= len(token) + 2:
+                value = value[len(token):]
+                value = re.sub(r"^(?:一下|一个|一份|一张|一次)\s*", "", value.lstrip())
+                break
+        if value == original:
+            break
+    return value.strip()
+
+
+def _request_intent_text(query: str) -> str:
+    """保留主题/类别词，只去掉请求壳、半径和"热力图"等非语义尾巴。
+
+    与 `_clean_request` 分开：后者为了拼采集关键词会删掉"拍照/约会/食堂"等词，
+    但主题判定与显式类别解析恰恰需要这些词。
+    """
+    text = _strip_request_prefix(str(query or "").strip())
+    text = _RADIUS_RE.sub("", text)
+    text = re.sub(r"(?:的)?(?:校园)?(?:热力图|热度图|分布图)(?:页面|数据|项目)?", "", text)
+    text = re.sub(r"(?:相关|主题|推荐)?\s*(?:可以吗|行吗|吗|呢)?$", "", text)
+    text = re.sub(r"\s+", " ", text).strip(" 的，,。；;：:？?!！")
+    return text
+
+
+def _cut_institution_left(text: str, suffix_start: int, window_chars: int = 16) -> str:
+    """从后缀左侧窗口里取"最后一个边界之后"的子串。"""
+    window = text[max(0, suffix_start - window_chars):suffix_start]
+    cut = 0
+    for token in _LEFT_BOUNDARY_TOKENS:
+        index = window.rfind(token)
+        if index >= 0:
+            cut = max(cut, index + len(token))
+    return window[cut:]
+
+
+class _NameMatch:
+    """轻量匹配结果：只暴露抽取后的完整机构名与匹配结束位置。"""
+
+    __slots__ = ("name", "end")
+
+    def __init__(self, name: str, end: int):
+        self.name = name
+        self.end = end
+
+    def group(self, _group: int = 0) -> str:
+        return self.name
+
+
+def _institution_at(value: str, suffix_end: int, suffix: str) -> str:
+    """把后缀与左侧紧邻的实词拼成机构名，并拒绝"大学城/大学路"等非学校词。"""
+    tail = value[suffix_end:suffix_end + 1]
+    if tail and tail in _INSTITUTION_TAIL_STOP:
+        return ""
+    prefix = _cut_institution_left(value, suffix_end - len(suffix))
+    if len(prefix) < 2:
+        return ""
+    name = prefix + suffix
+    if _INSTITUTION_NOISE_RE.search(name):
+        return ""
+    return name
+
+
+def _school_match(value: str):
+    """抽取完整校名；大学优先于学院，返回"边界锚定"后的干净名称。"""
+    for suffix in ("大学", "学院"):
+        for match in re.finditer(suffix, value):
+            name = _institution_at(value, match.end(), suffix)
+            if name:
+                return _NameMatch(name, match.end())
+    return None
+
+
 def _clean_request(query: str) -> str:
-    text = str(query or "").strip()
+    text = _strip_request_prefix(str(query or "").strip())
+    text = _RADIUS_RE.sub("", text)
     # Intent words are usually prefixes, so remove them only at the beginning
     # rather than deleting the same characters from a legitimate place name.
     for pattern in (
@@ -348,20 +569,18 @@ def _clean_request(query: str) -> str:
             if updated == text:
                 break
             text = updated.lstrip()
-    text = re.sub(r"(?:的)?(?:校园)?(?:热力图|热度图)(?:页面|数据|项目)?", "", text)
+    text = re.sub(r"(?:的)?(?:校园)?(?:热力图|热度图|分布图)(?:页面|数据|项目)?", "", text)
     text = re.sub(r"(校园|校内)?(地点|景点|场所)(推荐|分布)?", "", text)
     text = re.sub(r"(约会|情侣|浪漫|散步|遛弯|走走|休息|放松|拍照|摄影|出片|赏花|学习|自习|安静|吃饭|美食|餐厅|食堂)", "", text)
+    # 先切掉"并生成热力图"这类动作尾巴，再清"等一系列/等等"。
+    text = re.sub(r"(?:并|然后|再)?\s*(?:生成|制作|绘制|构建|输出|给出|展示|显示).*$", "", text)
     text = re.sub(r"^(?:关于|针对|位于|在)\s*", "", text)
+    text = re.sub(r"(?:等)?(?:一?系列)?(?:之类|等等|等)?$", "", text)
     text = re.sub(r"(?:相关|主题|推荐)?\s*(?:可以吗|行吗|吗|呢)?$", "", text)
     text = re.sub(r"\s+", " ", text).strip(" 的，,。；;：:？?!！")
     for alias in sorted(_SCHOOL_NAME_ALIASES, key=len, reverse=True):
         text = text.replace(alias, _SCHOOL_NAME_ALIASES[alias])
     return text
-
-
-def _school_match(value: str):
-    """Return a complete institution match, preferring the longer 大学 form."""
-    return _UNIVERSITY_NAME_RE.search(value) or _COLLEGE_NAME_RE.search(value)
 
 
 def _request_identity(value: str) -> tuple[str, str]:
@@ -377,8 +596,8 @@ def _request_identity(value: str) -> tuple[str, str]:
 
     match = _school_match(normalized)
     if match:
-        school_name = _SCHOOL_NAME_ALIASES.get(match.group(0), match.group(0))
-        remainder = normalized[match.end():].strip(" 的，,。；;：:")
+        school_name = _SCHOOL_NAME_ALIASES.get(match.name, match.name)
+        remainder = normalized[match.end:].strip(" 的，,。；;：:")
         campus_match = _CAMPUS_NAME_RE.search(remainder)
         campus_name = campus_match.group(0) if campus_match else ""
         ambiguous_label = campus_name or remainder
@@ -400,14 +619,73 @@ def _request_identity(value: str) -> tuple[str, str]:
     return normalized, normalized
 
 
+def _requested_keywords(text: str) -> list[str]:
+    """把用户显式写的类别词映射为采集关键词，保持出现顺序。"""
+    lowered = str(text or "").lower()
+    found = []
+    for keyword, synonyms in _REQUEST_CATEGORY_SYNONYMS:
+        if any(str(term).lower() in lowered for term in synonyms):
+            found.append(keyword)
+    return list(dict.fromkeys(found))
+
+
+def _strip_identity_terms(text: str, profile: dict) -> str:
+    """从意图文本里移除学校/校区名，避免"湖北大学"里的"湖"被当成湖泊。"""
+    value = str(text or "")
+    school = profile.get("school") or {}
+    campus = profile.get("campus") or {}
+    terms = [school.get("name"), school.get("enName"), *(school.get("aliases") or []),
+             campus.get("name"), *(campus.get("aliases") or [])]
+    for term in sorted((str(item).strip() for item in terms if str(item or "").strip()),
+                       key=len, reverse=True):
+        if len(term) >= 2:
+            value = value.replace(term, " ")
+    return value
+
+
+def _parse_radius(query: str) -> tuple[int | None, str]:
+    """解析"500米 / 1.5公里 / 2km内"，返回 (米, 来源)。"""
+    match = _RADIUS_RE.search(str(query or ""))
+    if not match:
+        return None, ""
+    try:
+        value = float(match.group(1))
+    except (TypeError, ValueError):
+        return None, ""
+    unit = match.group(2).lower()
+    meters = value * 1000 if unit in {"公里", "千米", "km", "k"} else value
+    if not math.isfinite(meters) or meters <= 0:
+        return None, ""
+    return int(min(max(meters, MIN_DISCOVERY_RADIUS_M), MAX_DISCOVERY_RADIUS_M)), "query"
+
+
+def _default_discovery_radius() -> int:
+    raw = (os.getenv("CAMPUS_DISCOVERY_RADIUS_M") or "").strip()
+    try:
+        value = int(float(raw)) if raw else DEFAULT_DISCOVERY_RADIUS_M
+    except (TypeError, ValueError):
+        value = DEFAULT_DISCOVERY_RADIUS_M
+    return int(min(max(value, MIN_DISCOVERY_RADIUS_M), MAX_DISCOVERY_RADIUS_M))
+
+
 class CampusProfileResolver:
     """Resolve a request against local campus config, then AMap geocoding."""
 
     def __init__(self, config_path: str | Path = _DEFAULT_CAMPUSES,
-                 *, api_key: str | None = None, request_json: Callable | None = None):
+                 *, api_key: str | None = None, request_json: Callable | None = None,
+                 request_poi: Callable | None = None, poi_timeout: float = 8):
         self.config_path = Path(config_path)
         self.api_key = (api_key or os.getenv("AMAP_WEB_SERVICE_KEY", "")).strip()
         self.request_json = request_json or self._request_json
+        self.poi_timeout = min(max(float(poi_timeout), 3), 20)
+        # 离线单测通常注入 request_json 且不提供 request_poi：这种组合绝不能发出
+        # 真实网络请求，因此只有"使用默认地理编码器"时才默认开启 POI 查询。
+        if request_poi is not None:
+            self.request_poi = request_poi
+        elif request_json is not None:
+            self.request_poi = None
+        else:
+            self.request_poi = self._request_poi
 
     def _config(self) -> dict:
         return json.loads(self.config_path.read_text(encoding="utf-8"))
@@ -486,6 +764,66 @@ class CampusProfileResolver:
             raise RuntimeError(f"AMap geocoding failed (infocode={infocode})")
         return data
 
+    def _request_poi(self, params: dict) -> dict:
+        """高德 POI 文本搜索（place/text）。错误信息沿用脱敏口径，不含 key/URL。"""
+        try:
+            response = requests.get(
+                "https://restapi.amap.com/v3/place/text",
+                params=params,
+                timeout=self.poi_timeout,
+                proxies=direct_proxies(),
+            )
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            detail = status if status is not None else "unknown"
+            raise RuntimeError(f"AMap POI search failed (HTTP {detail})") from None
+        except requests.RequestException as exc:
+            raise RuntimeError(
+                f"AMap POI search failed (network error: {type(exc).__name__})"
+            ) from None
+        try:
+            data = response.json()
+        except (TypeError, ValueError):
+            raise RuntimeError("AMap POI search returned invalid JSON") from None
+        if not isinstance(data, dict):
+            raise RuntimeError("AMap POI search returned an invalid response")
+        if str(data.get("status", "")) != "1":
+            infocode = str(data.get("infocode") or "unknown")
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", infocode):
+                infocode = "unknown"
+            raise RuntimeError(f"AMap POI search failed (infocode={infocode})")
+        if data.get("pois") is not None and not isinstance(data.get("pois"), list):
+            raise RuntimeError("AMap POI search returned an invalid poi list")
+        return data
+
+    def _poi_center(self, school_name: str, campus_label: str = "") -> dict | None:
+        """用 POI 精确点位校正校区中心；没有配置/失败时返回 None。"""
+        if self.request_poi is None or not self.api_key:
+            return None
+        queries = []
+        if campus_label and campus_label != school_name:
+            queries.append(f"{school_name}{campus_label}")
+        queries.append(school_name)
+        for query in queries:
+            try:
+                payload = self.request_poi({
+                    "key": self.api_key, "keywords": query,
+                    "offset": 10, "page": 1, "extensions": "base",
+                })
+            except (RuntimeError, requests.RequestException, OSError) as exc:
+                # POI 只是校正项，失败不应阻断地理编码兜底。
+                logger.warning("AMap POI lookup failed: %s", type(exc).__name__)
+                continue
+            picked = _pick_poi_location(
+                payload.get("pois") or [], school_name,
+                campus_label if query != school_name else "",
+            )
+            if picked:
+                picked["query"] = query
+                return picked
+        return None
+
     def _known(self, query: str) -> dict | None:
         config = self._config()
         text = query.lower()
@@ -553,6 +891,11 @@ class CampusProfileResolver:
             top_campus_score = max(item[1] for item in matches)
             candidates = [item for item in matches if item[1] == top_campus_score]
         _, _, campus, school = max(candidates, key=lambda item: (item[0], item[1]))
+        # 采集半径是"覆盖校界"的圆，可信半径只是兜底；页面上应显示实际搜索范围。
+        try:
+            radius = covering_radius_m(campus)
+        except (TypeError, ValueError):
+            radius = float(campus.get("trustRadiusM", DEFAULT_DISCOVERY_RADIUS_M))
         return {
             "school": {"id": campus["school"], "name": school.get("name", campus["school"]),
                        "enName": school.get("enName", ""), "aliases": school.get("aliases", [])},
@@ -564,8 +907,13 @@ class CampusProfileResolver:
             "discovery": {
                 "method": "local_config",
                 "query": query,
+                "cleanedQuery": _clean_request(query),
                 "resolvedSchool": school.get("name", campus["school"]),
                 "resolvedCampus": campus.get("name", ""),
+                "centerSource": "local_config",
+                "center": campus.get("center"),
+                "radiusMeters": radius,
+                "radiusSource": "campus_config",
             },
         }
 
@@ -573,9 +921,13 @@ class CampusProfileResolver:
         school_name, campus_name, normalized_query = self._request_identity(query)
         if not self.api_key:
             raise ValueError("unknown campus; AMAP_WEB_SERVICE_KEY is required for geocoding")
-        geocode_address = (
-            school_name if campus_name == school_name else f"{school_name}{campus_name}"
-        )
+        campus_label = "" if campus_name == school_name else campus_name
+        geocode_address = school_name if not campus_label else f"{school_name}{campus_label}"
+        radius_m, radius_source = _parse_radius(query)
+        if radius_m is None:
+            radius_m, radius_source = _default_discovery_radius(), "default"
+        warnings: list[str] = []
+
         payload = self.request_json({
             "key": self.api_key,
             "address": geocode_address,
@@ -585,25 +937,88 @@ class CampusProfileResolver:
         if not geocodes:
             raise ValueError("could not resolve a campus center from the request")
         item = geocodes[0]
-        center = _finite_location(item.get("location"))
-        if not center:
+        geocode_center = _finite_location(item.get("location"))
+        if not geocode_center:
             raise ValueError("geocoding result has no valid coordinates")
         address = str(item.get("formatted_address") or normalized_query)
+
+        # POI 精确点位是校区中心的首选校正项；地理编码只作为地址与兜底来源。
+        poi = self._poi_center(school_name, campus_label)
+
+        school_ok = _address_contains(address, school_name)
+        if not school_ok:
+            # 高德地理编码会把不存在的校区落到同名行政区，例如
+            # "北京大学海淀校区" → "北京市海淀区海淀校区"（离北大本部约 5km）。
+            # 这时退回"只编码校名"，用校本部中心并给出明确提示。
+            try:
+                fallback_payload = self.request_json({
+                    "key": self.api_key, "address": school_name, "output": "json",
+                })
+                fallback_item = (fallback_payload.get("geocodes") or [{}])[0]
+                fallback_center = _finite_location(fallback_item.get("location"))
+                fallback_address = str(fallback_item.get("formatted_address") or "")
+                if fallback_center and _address_contains(fallback_address, school_name):
+                    geocode_center = fallback_center
+                    address = fallback_address
+                    school_ok = True
+                    if not campus_label:
+                        warnings.append("地理编码结果未包含校名，已按校本部中心校正")
+            except (RuntimeError, requests.RequestException, OSError) as exc:
+                logger.warning("AMap school geocode fallback failed: %s", type(exc).__name__)
+        if not school_ok and not campus_label:
+            warnings.append("地理编码结果未包含校名，中心坐标请人工核对")
+
+        # 校名对不上时，地址里出现"海淀校区"也不足以证明这是北大的校区。
+        campus_ok = ((not campus_label) or _address_contains(address, campus_label)) and school_ok
+        if poi and poi.get("fullCampus"):
+            campus_ok = True
+
+        center = geocode_center
+        center_source = "amap_geocode"
+        if poi is not None:
+            poi_center = poi["center"]
+            drift = distance_m(poi_center, geocode_center)
+            # 只有"校区级 POI"或"地理编码不可信"时才用 POI 覆盖。
+            # 否则"上海交通大学徐汇校区"会被仅匹配到校本部的 POI 拉到闵行。
+            poi_is_campus_level = bool(poi.get("fullCampus")) or not campus_label
+            if (not school_ok or not campus_ok
+                    or (poi_is_campus_level and drift > 8000)):
+                center = poi_center
+                center_source = "amap_poi"
+                if poi_is_campus_level and drift > 8000:
+                    warnings.append("地理编码中心与高德 POI 偏差过大，已使用 POI 中心")
+
+        resolved_campus = campus_name
+        if campus_label and not campus_ok:
+            # 校区无法验证时按校本部范围采集，采集关键词不能带一个不存在的校区。
+            resolved_campus = school_name
+            warnings.append(f"未能定位到“{campus_label}”，已按{school_name}校本部范围采集")
+
         school_id = _slug(school_name, "school")
-        campus_slug = _slug(campus_name, "campus")
+        campus_slug = _slug(resolved_campus, "campus")
         aliases = list(_SCHOOL_ALIASES_BY_OFFICIAL.get(school_name, []))
+        discovery = {
+            "method": "amap_geocode",
+            "query": query,
+            "cleanedQuery": normalized_query,
+            "address": address,
+            "resolvedSchool": school_name,
+            "resolvedCampus": resolved_campus,
+            "centerSource": center_source,
+            "center": center,
+            "radiusMeters": radius_m,
+            "radiusSource": radius_source,
+        }
+        if poi is not None:
+            discovery["centerPoiName"] = poi.get("name") or ""
+        if warnings:
+            discovery["warning"] = "；".join(dict.fromkeys(warnings))
         return {
             "school": {"id": school_id, "name": school_name, "enName": "", "aliases": aliases},
-            "campus": {"name": campus_name, "slug": campus_slug, "aliases": [],
-                       "center": center, "trustRadiusM": 2000,
+            "campus": {"name": resolved_campus, "slug": campus_slug, "aliases": [],
+                       "center": center, "trustRadiusM": radius_m,
                        "coordinateSystem": "GCJ-02", "waterName": ""},
-            "discovery": {
-                "method": "amap_geocode",
-                "query": query,
-                "address": address,
-                "resolvedSchool": school_name,
-                "resolvedCampus": campus_name,
-            },
+            "discovery": discovery,
         }
 
     def resolve(self, query: str) -> dict:
@@ -957,15 +1372,18 @@ class DiscoveryOrchestrator:
              web_urls: list[str] | None = None, include_amap: bool = True,
              include_web: bool = True, auto_search: bool = False) -> DiscoveryPlan:
         profile = self.resolver.resolve(query)
-        theme = infer_theme(query)
+        # 主题与"用户显式写的类别"都要从去掉校名后的意图文本里读，
+        # 否则"湖北大学"里的"湖"会被当成湖泊。
+        intent_text = _strip_identity_terms(_request_intent_text(query), profile)
+        theme = infer_theme(intent_text)
+        explicit_keywords = _requested_keywords(intent_text)
         plant_keywords = list(THEME_PLANT_KEYWORDS.get(theme) or THEME_PLANT_KEYWORDS["general"])
-        selected = list(plant_keywords)
+        selected = list(explicit_keywords)
+        selected.extend(plant_keywords)
         if theme != "flower":
             selected.extend(THEME_KEYWORDS.get(theme) or THEME_KEYWORDS["general"])
         selected.extend(str(item).strip() for item in (keywords or []) if str(item).strip())
-        # A date request combines plant signals with a broader set of scenic
-        # categories. Keep enough terms for all of them; the harvester still
-        # applies provider/page limits and the review gate remains unchanged.
+        # 用户显式类别排在最前面，不能被默认词挤出 28 个上限。
         selected = list(dict.fromkeys(selected))[:28]
         manual_urls = list(dict.fromkeys(
             str(item).strip() for item in (web_urls or []) if str(item).strip()
@@ -973,6 +1391,9 @@ class DiscoveryOrchestrator:
         urls = list(manual_urls)
         sources = []
         warnings = []
+        discovery_warning = str((profile.get("discovery") or {}).get("warning") or "").strip()
+        if discovery_warning:
+            warnings.append(discovery_warning)
         search_queries: list[str] = []
         search_results: list[dict] = []
         provider = getattr(self.web_search, "provider", None) or self.web_search_provider
@@ -1072,6 +1493,11 @@ class DiscoveryOrchestrator:
                         scene_harvester, plan.searchResults, plan.profile,
                     )
                 result.append(scene_harvester)
+            # 网格 × 类型扫描：关键词召回只能命中名称里含主题词的点，院系、楼栋、
+            # 校医院等永远采不到。这里按 POI 类型码把范围扫一遍补齐。
+            # 请求量约为关键词召回的 3–5 倍，离线排查可用 CAMPUS_GRID_SCAN=0 关闭。
+            if str(os.getenv("CAMPUS_GRID_SCAN", "1")).strip().lower() not in {"0", "false", "off"}:
+                result.append(AmapGridTypeHarvester(plan.profile, cache=self.cache))
         if include_web and plan.web_urls:
             plant_web: Harvester = PlantWebHarvester(
                 plan.web_urls, plan.profile, cache=self.cache,

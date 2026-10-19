@@ -12,6 +12,7 @@ from .formal_asset_io import atomic_write_json
 from .normalize import normalize_candidate
 from .validate import validate_pois
 from .selection import load_selection
+from .user_pois import USER_POI_FILE, load_user_added
 
 
 ALLOWED_PATCH_FIELDS = {
@@ -55,6 +56,15 @@ def load_review(output: str | Path) -> dict:
             {"campus_registry", "scene_registry"} else "pending",
         )
         items.append(item)
+    # 用户手动补的点只在任务私有层，必须让前端能看见、能勾选、能删除；
+    # 它们默认仍是待审，只有管理员令牌才能转正。
+    user_added = []
+    for candidate in load_user_added(root):
+        item = copy.deepcopy(candidate)
+        item["userAdded"] = True
+        item["reviewStatus"] = decisions.get(str(candidate.get("id")), "pending")
+        items.append(item)
+        user_added.append(copy.deepcopy(item))
     approved = _read(root / "approved_pois.json", [])
     selection = load_selection(root, items)
     selected_ids = set(selection["selectedIds"])
@@ -65,6 +75,7 @@ def load_review(output: str | Path) -> dict:
         "school": (profile.get("school") or {}).get("name", ""),
         "profile": profile,
         "candidates": items,
+        "userAdded": user_added,
         "pendingInvalid": pending if isinstance(pending, list) else [],
         "approved": approved if isinstance(approved, list) else [],
         "selection": selection,
@@ -88,6 +99,11 @@ def apply_review(output: str | Path, decisions: list[dict]) -> dict:
         raise ValueError("build output does not contain a valid candidate bundle")
     membership_evaluator = CampusMembershipEvaluator(profile["campus"])
     by_id = {str(item.get("id")): copy.deepcopy(item) for item in normalized if isinstance(item, dict)}
+    # 管理员可以把用户补点转正：补点先进入同一份审核视图，通过后写 approved_pois.json。
+    user_added = load_user_added(root)
+    user_added_ids = {str(item.get("id")) for item in user_added}
+    for item in user_added:
+        by_id.setdefault(str(item.get("id")), copy.deepcopy(item))
     previous = _read(root / "review_state.json", {})
     status = dict(previous.get("decisions") or {}) if isinstance(previous, dict) else {}
     approved_by_id = {str(item.get("id")): copy.deepcopy(item)
@@ -96,6 +112,7 @@ def apply_review(output: str | Path, decisions: list[dict]) -> dict:
     if not isinstance(decisions, list):
         raise ValueError("decisions must be a list")
     errors = []
+    promoted_user_ids: set[str] = set()
     for index, decision in enumerate(decisions):
         if not isinstance(decision, dict):
             errors.append(f"decision[{index}] must be an object")
@@ -135,6 +152,8 @@ def apply_review(output: str | Path, decisions: list[dict]) -> dict:
                 normalized_candidate.pop("reviewedAt", None)
                 by_id[candidate_id] = normalized_candidate
                 status[candidate_id] = "approved"
+                if candidate_id in user_added_ids:
+                    promoted_user_ids.add(candidate_id)
             except (TypeError, ValueError) as exc:
                 errors.append(f"decision[{index}] cannot be approved: {exc}")
         elif action == "reject":
@@ -154,8 +173,22 @@ def apply_review(output: str | Path, decisions: list[dict]) -> dict:
         if isinstance(item, dict) else copy.deepcopy(item)
         for item in normalized
     ]
+    # 人工补点被管理员通过后并入候选清单，让审核列表与后续勾选保持一致。
+    for poi_id in sorted(promoted_user_ids):
+        if any(isinstance(item, dict) and str(item.get("id")) == poi_id
+               for item in updated_normalized):
+            continue
+        promoted = copy.deepcopy(by_id[poi_id])
+        promoted.pop("reviewStatus", None)
+        promoted.pop("reviewedAt", None)
+        updated_normalized.append(promoted)
     _write(root / "normalized_pois.json", updated_normalized)
     _write(root / "approved_pois.json", approved)
+    if promoted_user_ids:
+        # 已转正，从用户补点层移除，避免同一地点在审核视图出现两份。
+        _write(root / USER_POI_FILE,
+               [item for item in user_added
+                if str(item.get("id")) not in promoted_user_ids])
     _write(root / "review_state.json", {"updatedAt": _now(), "decisions": status,
                                          "approvedCount": len(approved),
                                          "validationProblems": problems})

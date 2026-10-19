@@ -9,6 +9,7 @@
 - 请求体超过上限 → 413，且必须是 JSON（默认 HTML 错误页前端解析不了）。
 """
 
+import json
 import os
 import tempfile
 import unittest
@@ -164,6 +165,52 @@ class RequestBodyLimitTests(_BuildRouteTestCase):
         payload = response.get_json()
         self.assertFalse(payload['success'])
         self.assertIn('请求体超过', payload['message'])
+
+
+class _PreviewManager:
+    """为预览路由准备一个带 campus_profile / 密度缓存的临时 workspace。"""
+
+    def __init__(self):
+        self.record = None
+
+    def get(self, job_id):
+        return self.record
+
+    def output_path(self, job_id):
+        return Path(tempfile.gettempdir()) / 'campus_build_preview_stub' / job_id
+
+    @contextmanager
+    def operation(self, job_id, name):
+        with tempfile.TemporaryDirectory(prefix='campus_preview_') as directory:
+            output = Path(directory)
+            (output / 'campus_profile.json').write_text(
+                json.dumps({'campus': {'slug': 'demo'}}), encoding='utf-8')
+            cache = output / 'preview_heatmap_cache'
+            cache.mkdir()
+            (cache / 'demo_density.json').write_text(
+                json.dumps({'grid': {'width': 1, 'height': 1, 'bounds': [0, 0, 1, 1],
+                                     'rowOrder': 'north_to_south', 'maxValue': 1000,
+                                     'noData': -1, 'values': [0]}}),
+                encoding='utf-8')
+            yield output
+
+
+class PreviewSceneAllowlistTests(_BuildRouteTestCase):
+    def test_density_scene_is_allowed_only_for_preview(self):
+        server._CAMPUS_BUILD_MANAGER = _PreviewManager()
+
+        response = self.client.get(f'/api/campus/build/{VALID_JOB_ID}/preview/density')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.get_json()['success'])
+
+    def test_unknown_scene_is_rejected(self):
+        server._CAMPUS_BUILD_MANAGER = _PreviewManager()
+
+        response = self.client.get(f'/api/campus/build/{VALID_JOB_ID}/preview/nope')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('scene', response.get_json()['message'])
 
 
 if __name__ == '__main__':

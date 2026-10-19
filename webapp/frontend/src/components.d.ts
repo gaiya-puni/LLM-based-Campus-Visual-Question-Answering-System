@@ -7,6 +7,7 @@ export {}
 
 declare module 'vue' {
   export interface GlobalComponents {
+    CandidateDataSummary: typeof import('./components/CandidateDataSummary.vue')['default']
     CommentReportDialog: typeof import('./components/CommentReportDialog.vue')['default']
     DevicePreviewFrame: typeof import('./components/DevicePreviewFrame.vue')['default']
     Echarts: typeof import('./components/Echarts.vue')['default']
@@ -16,7 +17,10 @@ declare module 'vue' {
     ElCarousel: typeof import('element-plus/es')['ElCarousel']
     ElCarouselItem: typeof import('element-plus/es')['ElCarouselItem']
     ElCheckbox: typeof import('element-plus/es')['ElCheckbox']
+    ElCheckboxGroup: typeof import('element-plus/es')['ElCheckboxGroup']
     ElCol: typeof import('element-plus/es')['ElCol']
+    ElCollapse: typeof import('element-plus/es')['ElCollapse']
+    ElCollapseItem: typeof import('element-plus/es')['ElCollapseItem']
     ElContainer: typeof import('element-plus/es')['ElContainer']
     ElDialog: typeof import('element-plus/es')['ElDialog']
     ElDrawer: typeof import('element-plus/es')['ElDrawer']
@@ -32,6 +36,7 @@ declare module 'vue' {
     ElOption: typeof import('element-plus/es')['ElOption']
     ElPagination: typeof import('element-plus/es')['ElPagination']
     ElProgress: typeof import('element-plus/es')['ElProgress']
+    ElRadio: typeof import('element-plus/es')['ElRadio']
     ElRadioButton: typeof import('element-plus/es')['ElRadioButton']
     ElRadioGroup: typeof import('element-plus/es')['ElRadioGroup']
     ElRow: typeof import('element-plus/es')['ElRow']

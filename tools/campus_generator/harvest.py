@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 
 import requests
 
-from .boundary import CampusMembershipEvaluator, membership_evidence
+from .boundary import CampusMembershipEvaluator, distance_m, membership_evidence
 from .outbound import direct_proxies, system_proxies
 
 
@@ -300,6 +300,60 @@ class AmapPoiHarvester:
                     self._sleep(delay)
         raise AssertionError("unreachable")
 
+    def _candidates_from_pois(self, pois, membership_evaluator,
+                              radius: int, query_label: str) -> tuple[list[dict], int]:
+        """把一页高德 POI 转成候选，返回 ``(候选, 被范围排除的数量)``。
+
+        关键词召回与"网格 × 类型"扫描共用这一段，保证两种来源的字段、
+        证据与范围判定完全一致——否则同一个地点会因为入口不同而分数不同。
+        """
+        campus = self.profile["campus"]
+        results: list[dict] = []
+        excluded = 0
+        for poi in pois:
+            if not isinstance(poi, dict):
+                continue
+            try:
+                lng_text, lat_text = str(poi.get("location", "")).split(",", 1)
+                lng, lat = float(lng_text), float(lat_text)
+                accepted, distance, membership = membership_evaluator.evaluate((lng, lat))
+                if not math.isfinite(distance) or not accepted:
+                    excluded += 1
+                    continue
+                name = str(poi.get("name") or "").strip()
+                if not name:
+                    continue
+                poi_type = str(poi.get("type") or "地点")
+                address = str(poi.get("address") or "")
+                provider_id = str(poi.get("id") or "")
+                results.append({
+                    "name": name,
+                    "locationName": name,
+                    "category": "scene",
+                    "subCategory": poi_type.split(";")[0] or "地点",
+                    "lng": lng,
+                    "lat": lat,
+                    "tags": [query_label, *[part for part in poi_type.split(";") if part]],
+                    "text": " ".join(part for part in (name, poi_type, address, query_label,
+                                                       campus["name"], self.profile["school"]["name"])
+                                     if part),
+                    "source": self.source,
+                    "sourceUrls": [],
+                    "sourceId": provider_id,
+                    "coordinateSystem": "GCJ-02",
+                    "confidence": 0.72,
+                    "verified": False,
+                    "evidence": {"provider": "Amap", "type": poi_type,
+                                 "address": address,
+                                 "keyword": query_label, "queryRadiusMeters": radius,
+                                 **membership_evidence(membership, distance)},
+                    "meta": {"address": address, "amapType": poi_type,
+                             "amapId": provider_id, "sourceQuery": query_label},
+                })
+            except (TypeError, ValueError):
+                continue
+        return results, excluded
+
     def _collect_keyword(self, keyword: str) -> tuple[list[dict], list[str]]:
         campus = self.profile["campus"]
         if campus.get("coordinateSystem") not in (None, "GCJ-02"):
@@ -369,46 +423,11 @@ class AmapPoiHarvester:
                 )
                 break
             pois = payload.get("pois") or []
-            for poi in pois:
-                try:
-                    lng_text, lat_text = str(poi.get("location", "")).split(",", 1)
-                    lng, lat = float(lng_text), float(lat_text)
-                    accepted, distance, membership = membership_evaluator.evaluate((lng, lat))
-                    if not math.isfinite(distance) or not accepted:
-                        excluded_outside += 1
-                        continue
-                    name = str(poi.get("name") or "").strip()
-                    if not name:
-                        continue
-                    poi_type = str(poi.get("type") or "地点")
-                    address = str(poi.get("address") or "")
-                    provider_id = str(poi.get("id") or "")
-                    results.append({
-                        "name": name,
-                        "locationName": name,
-                        "category": "scene",
-                        "subCategory": poi_type.split(";")[0] or "地点",
-                        "lng": lng,
-                        "lat": lat,
-                        "tags": [keyword, *[part for part in poi_type.split(";") if part]],
-                        "text": " ".join(part for part in (name, poi_type, address, keyword,
-                                                                campus["name"], self.profile["school"]["name"])
-                                          if part),
-                        "source": self.source,
-                        "sourceUrls": [],
-                        "sourceId": provider_id,
-                        "coordinateSystem": "GCJ-02",
-                        "confidence": 0.72,
-                        "verified": False,
-                        "evidence": {"provider": "Amap", "type": poi_type,
-                                     "address": address,
-                                     "keyword": keyword, "queryRadiusMeters": radius,
-                                     **membership_evidence(membership, distance)},
-                        "meta": {"address": address, "amapType": poi_type,
-                                 "amapId": provider_id, "sourceQuery": keyword},
-                    })
-                except (TypeError, ValueError):
-                    continue
+            page_results, page_excluded = self._candidates_from_pois(
+                pois, membership_evaluator, radius, keyword,
+            )
+            results.extend(page_results)
+            excluded_outside += page_excluded
             if len(pois) < self.page_size:
                 break
         if excluded_outside:
@@ -436,13 +455,180 @@ class AmapPoiHarvester:
                 )
         return results, warnings
 
+    @staticmethod
+    def _dedupe_candidates(candidates: list[dict], same_name_meters: float = 30) -> list[dict]:
+        """同一高德 POI 会被多个关键词命中；同名且 30m 内的点也视为同一个。
+
+        只按名称分组比较，避免在几百个点上做全量 O(n²) 距离计算。
+        """
+        seen_ids: set[str] = set()
+        by_name: dict[str, list[tuple[float, float]]] = {}
+        kept: list[dict] = []
+        for item in candidates:
+            source_id = str(item.get("sourceId") or "").strip()
+            if source_id and source_id in seen_ids:
+                continue
+            name = str(item.get("name") or "")
+            # 缓存文件可能被手工改坏或来自旧版本；单条缺坐标不应让整批采集崩掉。
+            try:
+                point = (float(item.get("lng")), float(item.get("lat")))
+            except (TypeError, ValueError):
+                continue
+            nearby = by_name.setdefault(name, [])
+            if any(distance_m(point, other) <= same_name_meters for other in nearby):
+                continue
+            nearby.append(point)
+            if source_id:
+                seen_ids.add(source_id)
+            kept.append(item)
+        # 审核列表按"距校区中心"排序：越靠外的点越需要人工判断。
+        kept.sort(key=lambda item: (
+            float((item.get("evidence") or {}).get("distanceMeters", float("inf"))),
+            str(item.get("name") or ""),
+        ))
+        return kept
+
     def collect(self) -> HarvestResult:
         all_candidates, warnings = [], []
         for keyword in self.keywords:
             candidates, keyword_warnings = self._collect_keyword(keyword)
             all_candidates.extend(candidates)
             warnings.extend(keyword_warnings)
-        return HarvestResult(all_candidates, self.source, warnings)
+        deduped = self._dedupe_candidates(all_candidates)
+        if len(deduped) != len(all_candidates):
+            warnings.append(
+                f"AMap harvest deduplicated {len(all_candidates) - len(deduped)} "
+                "same-POI or same-name-within-30m candidates"
+            )
+        return HarvestResult(deduped, self.source, warnings)
+
+
+# 高德 v3 的 POI 分类码。关键词召回只能命中"名称里含主题词"的点：
+# 学院、系、研究院、楼栋、校医院都不含"图书馆/湖泊/亭子"等词，永远采不到。
+# 这里按类型码把整片范围扫一遍补齐；顺序即前端分组顺序。
+CAMPUS_POI_TYPES: tuple[tuple[str, str], ...] = (
+    ("科教文化服务", "141200"),
+    ("商务住宅", "120000"),
+    ("体育休闲服务", "080000"),
+    ("医疗保健服务", "090100"),
+    ("风景名胜", "110000"),
+    ("餐饮服务", "050000"),
+    ("购物服务", "060000"),
+    ("政府机构及社会团体", "130000"),
+    ("交通设施服务", "150000"),
+    ("生活服务", "070000"),
+)
+
+
+class AmapGridTypeHarvester(AmapPoiHarvester):
+    """按"网格 × POI 类型码"扫描校园范围，补足纯关键词召回的遗漏。
+
+    与 :class:`AmapPoiHarvester` 的差别只有两点：请求不带 ``keywords`` 而带
+    ``types``；搜索范围切成 ``grid × grid`` 个小格分别查。这样名称不含主题词的
+    地点（院系、楼栋、校医院）能被召回，也不会因为单次查询的结果上限而全部
+    挤在中心区域。
+    """
+
+    source = "amap_grid"
+    POLICY_VERSION = 1
+    QUERY_LABEL = "校园类型扫描"
+
+    def __init__(self, profile: dict, *, grid: int = 5,
+                 types: tuple[tuple[str, str], ...] | None = None, **kwargs):
+        super().__init__(profile, [], **kwargs)
+        self.grid = min(max(int(grid), 1), 8)
+        self.types = tuple(types or CAMPUS_POI_TYPES)
+
+    def cells(self) -> list[tuple[list[float], int]]:
+        """把外接正方形切成 grid² 格，返回 ``[(格中心, 搜索半径), ...]``。"""
+        campus = self.profile["campus"]
+        center = [float(value) for value in campus["center"]]
+        evaluator = CampusMembershipEvaluator(campus)
+        span = min(max(int(math.ceil(evaluator.covering_radius_m())), 100), 50000)
+        step = 2 * span / self.grid
+        # 1 米对应的经纬度增量：经度随纬度收缩，避免高纬校区网格被压扁。
+        latitude_scale = 111_320.0
+        longitude_scale = latitude_scale * math.cos(math.radians(center[1])) or latitude_scale
+        # 半径取格对角线的一半再留 20% 余量，保证相邻格之间没有空洞。
+        cell_radius = max(80, int(math.ceil(step * math.sqrt(2) / 2 * 1.2)))
+        result = []
+        for row in range(self.grid):
+            for column in range(self.grid):
+                east = -span + step * (column + 0.5)
+                north = span - step * (row + 0.5)
+                result.append(([center[0] + east / longitude_scale,
+                                center[1] + north / latitude_scale], cell_radius))
+        return result
+
+    def collect(self) -> HarvestResult:
+        if not self.api_key:
+            raise ValueError("AMAP_WEB_SERVICE_KEY is not configured")
+        campus = self.profile["campus"]
+        membership_evaluator = CampusMembershipEvaluator(campus)
+        type_codes = [code for _, code in self.types]
+        cells = self.cells()
+        all_candidates: list[dict] = []
+        warnings: list[str] = []
+        for index, (cell_center, cell_radius) in enumerate(cells, start=1):
+            cache_params = {
+                "campus": campus["slug"], "cell": cell_center, "radius": cell_radius,
+                "types": type_codes, "pages": self.max_pages, "pageSize": self.page_size,
+                "policy": self.POLICY_VERSION,
+            }
+            cached = self.cache.get(self.source, cache_params) if self.cache else None
+            if cached is not None:
+                all_candidates.extend(cached)
+                continue
+            cell_results: list[dict] = []
+            completed = True
+            excluded = 0
+            for page in range(1, self.max_pages + 1):
+                params = {
+                    "key": self.api_key,
+                    "location": f"{cell_center[0]},{cell_center[1]}",
+                    "types": "|".join(type_codes),
+                    "radius": cell_radius,
+                    "offset": self.page_size,
+                    "page": page,
+                    "extensions": "all",
+                }
+                try:
+                    payload, retry_failures = self._request_page(params)
+                    if retry_failures:
+                        warnings.append(
+                            f"AMap grid {index}/{len(cells)} page {page}: recovered after "
+                            f"{len(retry_failures) + 1} attempts"
+                        )
+                except _AmapRequestFailure as exc:
+                    completed = False
+                    warnings.append(
+                        f"AMap grid {index}/{len(cells)} page {page}: failed after "
+                        f"{len(exc.failures)} attempt(s); partial result not cached"
+                    )
+                    break
+                pois = payload.get("pois") or []
+                page_results, page_excluded = self._candidates_from_pois(
+                    pois, membership_evaluator, cell_radius, self.QUERY_LABEL,
+                )
+                cell_results.extend(page_results)
+                excluded += page_excluded
+                if len(pois) < self.page_size:
+                    break
+            if excluded:
+                warnings.append(
+                    f"AMap grid {index}/{len(cells)}: excluded {excluded} candidates "
+                    "outside campus boundary"
+                )
+            if completed and self.cache:
+                self.cache.put(self.source, cache_params, cell_results)
+            all_candidates.extend(cell_results)
+        deduped = self._dedupe_candidates(all_candidates)
+        if len(deduped) != len(all_candidates):
+            warnings.append(
+                f"AMap grid scan deduplicated {len(all_candidates) - len(deduped)} "
+                "same-POI candidates across overlapping cells"
+            )
+        return HarvestResult(deduped, self.source, warnings)
 
 
 class _PageParser(HTMLParser):

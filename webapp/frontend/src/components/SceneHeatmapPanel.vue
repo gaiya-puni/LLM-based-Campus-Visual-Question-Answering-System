@@ -109,7 +109,12 @@ const render = () => {
   }
   const AMap = (window as any).AMap;
   try {
-    layer = new AMap.ImageLayer({ url: canvas.toDataURL('image/png'), bounds: grid.bounds,
+    // 显式 AMap.Bounds，避免扁平数组在不同 JS API 版本里被解释成别的顺序。
+    const bounds = new AMap.Bounds(
+      [grid.bounds[0], grid.bounds[1]],
+      [grid.bounds[2], grid.bounds[3]],
+    );
+    layer = new AMap.ImageLayer({ url: canvas.toDataURL('image/png'), bounds,
       zooms: [3, 22], opacity: opacity.value, zIndex: 90 });
     layerMap = props.map;
     layerMap.add(layer);

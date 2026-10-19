@@ -12,16 +12,17 @@ from paths import BASE as _BASE
 from runtime import facade
 from flask_app import rate_limit
 from api.review_guard import review_denied, review_token_ok
-from scene_heatmaps import SCENE_IDS
 # CampusProfileResolver / WebSearchClient 会被测试整体替换
 # （`patch.object(server, "CampusProfileResolver", ...)`），所以必须作为模块属性存在。
 from tools.campus_generator.discovery import CampusProfileResolver, DiscoveryOrchestrator  # noqa: F401
 from tools.campus_generator.harvest import (AmapPoiHarvester, HarvestCache, JsonHarvester,
                                             PublicWebHarvester)
 from tools.campus_generator.jobs import JobCapacityError, JobNotReadyError
+from tools.campus_generator.preview import PREVIEW_SCENE_IDS
 from tools.campus_generator.publish import build_publish_plan, publish as _publish_campus_build
 from tools.campus_generator.review import apply_review, load_review
 from tools.campus_generator.selection import save_selection
+from tools.campus_generator.user_pois import add_user_added, remove_user_added
 from tools.campus_generator.web_search import WebSearchClient  # noqa: F401
 
 bp = Blueprint('campus_build_api', __name__)
@@ -221,6 +222,56 @@ def update_campus_build_selection(job_id):
         return jsonify({'success': False, 'message': str(exc)}), 404
 
 
+@bp.route('/api/campus/build/<job_id>/user-pois', methods=['POST'])
+@rate_limit(30)
+def add_campus_user_poi(job_id):
+    """Append one user-marked point to this job's private layer (no token)."""
+    data = request.get_json(silent=True) or {}
+    try:
+        if not _campus_job_access(job_id):
+            return _campus_access_denied()
+        with _campus_job_operation(job_id, 'user-poi-write') as output:
+            profile = json.loads((output / 'campus_profile.json').read_text(encoding='utf-8'))
+            report_path = output / 'build_report.json'
+            report = json.loads(report_path.read_text(encoding='utf-8')) \
+                if report_path.is_file() else {}
+            theme = report.get('theme') if isinstance(report, dict) else None
+            result = add_user_added(output, data, profile, theme=theme)
+            invalidate_preview = getattr(facade._CAMPUS_BUILD_MANAGER, 'invalidate_preview', None)
+            if invalidate_preview is not None:
+                invalidate_preview(job_id)
+            return jsonify({'success': True, 'jobId': job_id, **result})
+    except JobNotReadyError as exc:
+        return jsonify({'success': False, 'message': str(exc)}), 409
+    except LookupError as exc:
+        return jsonify({'success': False, 'message': str(exc)}), 404
+    except (TypeError, ValueError, OSError, json.JSONDecodeError) as exc:
+        return jsonify({'success': False, 'message': str(exc)}), 400
+
+
+@bp.route('/api/campus/build/<job_id>/user-pois/<poi_id>', methods=['DELETE'])
+@rate_limit(30)
+def delete_campus_user_poi(job_id, poi_id):
+    """Remove one user-marked point; formal candidates are rejected here."""
+    try:
+        if not _campus_job_access(job_id):
+            return _campus_access_denied()
+        if not poi_id or len(poi_id) > 200:
+            raise ValueError('poi id is invalid')
+        with _campus_job_operation(job_id, 'user-poi-write') as output:
+            result = remove_user_added(output, poi_id)
+            invalidate_preview = getattr(facade._CAMPUS_BUILD_MANAGER, 'invalidate_preview', None)
+            if invalidate_preview is not None:
+                invalidate_preview(job_id)
+            return jsonify({'success': True, 'jobId': job_id, **result})
+    except JobNotReadyError as exc:
+        return jsonify({'success': False, 'message': str(exc)}), 409
+    except LookupError as exc:
+        return jsonify({'success': False, 'message': str(exc)}), 404
+    except (TypeError, ValueError, OSError, json.JSONDecodeError) as exc:
+        return jsonify({'success': False, 'message': str(exc)}), 400
+
+
 @bp.route('/api/campus/build/<job_id>/preview', methods=['POST'])
 @rate_limit(10)
 def submit_campus_build_preview(job_id):
@@ -287,7 +338,7 @@ def publish_campus_build(job_id):
 @bp.route('/api/campus/build/<job_id>/preview/<scene>', methods=['GET'])
 @rate_limit(120)
 def get_campus_build_preview(job_id, scene):
-    if scene not in SCENE_IDS:
+    if scene not in PREVIEW_SCENE_IDS:
         return jsonify({'success': False, 'message': 'scene is invalid'}), 400
     if not _campus_job_access(job_id, admin_allowed=True):
         return _campus_access_denied()

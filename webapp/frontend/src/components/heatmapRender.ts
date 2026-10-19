@@ -187,6 +187,14 @@ export interface HeatmapRenderOptions {
   coverageAlpha?: number;
   /** Clip after interpolation and blur to the original data footprint. */
   clipToData?: boolean;
+  /**
+   * 显示拉伸方式。默认 linear（问答页保持原输出）；
+   * quantile 把有效值 p10→0、p95→1，仅用于生成页预览，避免低中值区被压成一层淡色。
+   */
+  stretch?: 'linear' | 'quantile';
+  /** quantile 拉伸的下/上分位，默认 0.10 / 0.95。 */
+  quantileLow?: number;
+  quantileHigh?: number;
 }
 
 /** Campus-wide soft context for chat; agent previews keep their own policy. */
@@ -199,9 +207,34 @@ export const CHAT_HEATMAP_OPTIONS: HeatmapRenderOptions = {
 
 /** 仅生成页使用；问答页使用独立 CHAT_HEATMAP_OPTIONS。 */
 export const PREVIEW_HEATMAP_OPTIONS: HeatmapRenderOptions = {
-  upscale: 4, threshold: 0.05, contours: false, blurPx: 18,
+  upscale: 4, threshold: 0.05, contours: false, blurPx: 10,
   alphaExponent: 0.9, featherNoData: true,
+  // 预览的场强中位数常在 0.2–0.4 之间；线性映射会得到一层很淡的蒙版。
+  // 分位拉伸只改显示，不改热图数值，也不影响问答页。
+  stretch: 'quantile',
 };
+
+/**
+ * 有效值分位边界。少于 8 个有效格时退回线性，避免小样本把噪声放大。
+ */
+export function quantileBounds(
+  values: number[],
+  noData: number,
+  low = 0.1,
+  high = 0.95,
+): [number, number] | null {
+  const valid = values
+    .filter(value => value !== undefined && value !== noData && Number.isFinite(value))
+    .sort((a, b) => a - b);
+  if (valid.length < 8) return null;
+  const pick = (q: number) => {
+    const index = Math.min(valid.length - 1, Math.max(0, Math.floor(q * (valid.length - 1))));
+    return valid[index];
+  };
+  const lo = pick(low);
+  const hi = pick(high);
+  return hi > lo ? [lo, hi] : null;
+}
 
 /**
  * 把栅格渲染成可直接交给 `AMap.ImageLayer` 的 canvas。
@@ -232,11 +265,24 @@ export function renderHeatmapCanvas(
   const raster = sourceContext.createImageData(dense.width, dense.height);
   const bandOf = new Int16Array(dense.width * dense.height).fill(-1);
   const maxValue = grid.maxValue || 1;
+  // 显示拉伸：linear 保持问答页原输出；quantile 只作用于生成页预览。
+  let scaleLow = 0;
+  let scaleHigh = maxValue;
+  if (options.stretch === 'quantile') {
+    const bounds = quantileBounds(
+      dense.values, grid.noData, options.quantileLow, options.quantileHigh,
+    );
+    if (bounds) {
+      scaleLow = bounds[0];
+      scaleHigh = bounds[1];
+    }
+  }
+  const scaleSpan = scaleHigh - scaleLow || 1;
 
   for (let index = 0; index < dense.values.length; index++) {
     const value = dense.values[index];
     if (value === undefined || value === grid.noData) continue;
-    const t = clamp01(value / maxValue);
+    const t = clamp01((value - scaleLow) / scaleSpan);
     const envelope = dense.coverage
       ? clamp01((dense.coverage[index] ?? 0) / maxValue) : 1;
     const heatAlpha = Math.round(alphaFor(t, threshold, options.alphaExponent ?? 1.5) * envelope);

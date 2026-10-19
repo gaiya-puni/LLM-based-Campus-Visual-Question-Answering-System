@@ -7,6 +7,7 @@
     "dev": "vite",
     "dev:mobile": "node scripts/mobile-dev.mjs",
     "test:heatmap": "node --test tests/heatmapRender.test.mjs",
+    "test:summary": "node --test tests/candidateSummary.test.mjs",
     "test:assets": "node --test tests/frontendAssets.test.mjs",
     "test:mobile": "node scripts/mobile-regression.mjs",
     "build": "vue-tsc && vite build",

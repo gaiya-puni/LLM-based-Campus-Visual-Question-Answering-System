@@ -242,6 +242,20 @@ class GeneratorTests(unittest.TestCase):
         })
         self.assertEqual(quality["scores"]["sourceReliability"], 0.68)
 
+    def test_quality_general_theme_uses_explicit_harvest_evidence(self):
+        generic = assess_candidate_quality({
+            "name": "校园地点", "campus": "示例校区", "source": "amap_scene",
+            "evidence": {"campusMembershipMethod": "radius_fallback"},
+        }, theme="general")
+        evidenced = assess_candidate_quality({
+            "name": "校园地点", "campus": "示例校区", "source": "amap_scene",
+            "evidence": {"campusMembershipMethod": "radius_fallback",
+                         "sceneFilter": "walk candidate-specific keyword match"},
+        }, theme="general")
+        self.assertEqual(generic["scores"]["themeRelevance"], 0.55)
+        self.assertEqual(evidenced["scores"]["themeRelevance"], 0.9)
+        self.assertGreater(evidenced["confidence"], generic["confidence"])
+
     def test_normalization_enforces_boundary_coordinate_system_and_membership(self):
         candidates = [
             {"name": "边界内远点", "lng": 121.015, "lat": 31.0,
@@ -443,20 +457,28 @@ class GeneratorTests(unittest.TestCase):
             self.assertEqual(campus["boundary"], TRUSTED_BOUNDARY)
             self.assertEqual(campus["coordinateSystem"], "GCJ-02")
 
-    def test_preview_expands_local_support_without_changing_formal_config(self):
+    def test_preview_tightens_support_and_adds_density_scene(self):
         backend_config = Path(__file__).resolve().parents[2] / "webapp/backend/heatmap_config.json"
         original = backend_config.read_bytes()
         with tempfile.TemporaryDirectory() as directory:
             workspace = Path(directory)
-            _write_preview_pois(workspace, PROFILE, [])
+            poi_path = _write_preview_pois(workspace, PROFILE, [{
+                "id": "preview-1", "category": "scene", "name": "示例场景",
+                "lng": 121.0, "lat": 31.0, "campus": "示例校区",
+            }])
+            preview_pois = json.loads(poi_path.read_text(encoding="utf-8"))
+            self.assertIn("density", preview_pois[0]["scenes"])
             config = json.loads((workspace / "heatmap_config.json").read_text(encoding="utf-8"))
-            self.assertEqual(config["supportMeters"], 200)
+            self.assertEqual(config["supportMeters"], 120)
             self.assertTrue(all("displayCoverage" not in entry
                                 for entry in config["campuses"].values()))
             self.assertEqual(config["minInfluenceMeters"], 120)
-            self.assertEqual(config["maxInfluenceMeters"], 450)
+            self.assertEqual(config["maxInfluenceMeters"], 300)
             self.assertEqual(config["minimumCategoryActivation"], 0.2)
+            self.assertEqual(config["scenes"]["density"], "点位密度")
+            self.assertTrue(config["sceneCorpusOverrides"]["density"])
             self.assertNotIn("minimumCategoryActivation", json.loads(original))
+            self.assertNotIn("density", json.loads(original).get("scenes", {}))
             self.assertEqual(config["campuses"]["示例校区"]["center"], PROFILE["campus"]["center"])
             self.assertEqual(backend_config.read_bytes(), original)
 
