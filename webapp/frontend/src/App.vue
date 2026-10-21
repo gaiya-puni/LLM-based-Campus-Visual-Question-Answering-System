@@ -6,9 +6,9 @@
     <div v-else-if="isMobile" class="mobile-shell">
       <header class="mobile-topbar">
         <div class="mobile-topbar__logo">
-          <img src="./views/icons/ecnu_logo.png" alt="ECNU" />
+          <img src="./views/icons/tree.png" alt="知行校园图标" />
         </div>
-        <span class="mobile-topbar__title">ECNU校园可视问答系统</span>
+        <span class="mobile-topbar__title">知行校园 CampusMind</span>
         <!-- 移动端空间有限：只放"切到桌面版"的单按钮，避免压住底部输入区 -->
         <view-mode-switch placement="topbar" />
       </header>
@@ -222,10 +222,12 @@ background-size:100% 100%;
 }
 
 .mobile-topbar__title {
+  flex: 1;
+  min-width: 0;
   color: #fff;
-  font-size: 17px;
+  font-size: clamp(13px, 4vw, 17px);
   font-weight: 600;
-  letter-spacing: 0.5px;
+  letter-spacing: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

@@ -1,7 +1,7 @@
 <script>
 export default {
   onLaunch() {
-    console.log('校园可视可答 App 启动');
+    console.log('知行校园 CampusMind App 启动');
   },
   onShow() {},
   onHide() {}

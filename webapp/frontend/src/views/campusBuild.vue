@@ -15,7 +15,7 @@
         :rows="2"
         maxlength="240"
         show-word-limit
-        placeholder="例如：帮我做华东师范大学闵行校区的约会热力图"
+        placeholder="例如：帮我做XX大学XX校区的约会热力图"
       />
       <div class="request-options">
         <el-input v-model="webUrlsText" placeholder="补充公开网页 URL（可选，多个用换行分隔）" />
@@ -27,7 +27,6 @@
         <el-checkbox v-model="includeAmap">搜索高德 POI</el-checkbox>
         <el-checkbox v-model="includeWeb">采集公开网页</el-checkbox>
         <el-checkbox v-model="autoSearch" :disabled="!includeWeb">自动搜索公开网页</el-checkbox>
-        <span class="source-hint">高德需 AMAP_WEB_SERVICE_KEY；自动搜索需 Tavily 或 Brave Search Key。搜索命中仍须安全采集和人工审核。</span>
       </div>
       <div class="review-token-row">
         <el-input
@@ -81,7 +80,7 @@
         <strong>未发现可用地点</strong>
         <p>请先核对上方解析出的学校和校区是否正确，再按以下方式重试：</p>
         <ul>
-          <li>输入准确的学校与校区名称，例如“同济大学四平路校区拍照热力图”。</li>
+          <li>输入准确的学校与校区名称，例如“XX大学XX校区拍照热力图”。</li>
           <li>保持“搜索高德 POI”开启，并确认后端已配置高德 Web 服务 Key；若提示请求限流，请稍后重试。</li>
           <li>网页搜索只能提供地点线索，最终地点仍需可解析的名称与坐标；也可补充学校官网的地点介绍页。</li>
         </ul>
@@ -1055,7 +1054,7 @@ onBeforeUnmount(() => {
 .page-header { justify-content: space-between; } h2, h3, p { margin: 0; } h2 { color: #303133; font-size: 21px; } h3 { color: #303133; font-size: 16px; } .page-header p, .panel-head p { color: #909399; font-size: 13px; margin-top: 5px; }
 .request-card, .job-card, .candidate-panel, .map-panel { border: 1px solid #ebeef5; border-radius: 12px; background: #fff; padding: 14px; }
 .request-options { margin-top: 10px; } .request-options .el-input { flex: 1; } .resume-row { margin-top: 10px; max-width: 420px; } .resume-row .el-input { flex: 1; }
-.source-options { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 9px; } .source-hint { color: #909399; font-size: 12px; }
+.source-options { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 9px; }
 .review-token-row { display: grid; grid-template-columns: minmax(280px, 1fr) 1.4fr; align-items: center; gap: 12px; margin-top: 10px; } .review-token-row span { color: #909399; font-size: 12px; }
 .error { color: #f56c6c; font-size: 13px; margin-top: 8px; }
 .discovery-details { margin-top: 10px; padding: 10px 12px; border: 1px solid #d9ecff; border-radius: 8px; background: #f4f9ff; color: #606266; font-size: 12px; }

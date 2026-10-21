@@ -1,7 +1,7 @@
 {
-  "name": "校园可视可答",
+  "name": "知行校园 CampusMind",
   "appid": "",
-  "description": "ECNU 校园可视可答系统移动端壳应用（web-view 承载线上 H5）",
+  "description": "知行校园 CampusMind 移动端壳应用（web-view 承载线上 H5）",
   "versionName": "1.0.0",
   "versionCode": "100",
   "transformPx": false,

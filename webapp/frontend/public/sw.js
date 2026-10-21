@@ -1,9 +1,9 @@
 /*
- * ECNU·校园可视可答系统 Service Worker
+ * 知行校园 CampusMind Service Worker
  * 策略：同源静态资源"网络优先、缓存兜底"；/api/ 请求永不缓存（保证问答实时性）；
  * 跨域资源（高德地图 SDK/瓦片）不拦截。上线更新缓存时递增 CACHE 版本号即可。
  */
-const CACHE = 'ecnu-vqa-cache-v1';
+const CACHE = 'campusmind-cache-v2';
 const PRECACHE = ['./', './index.html'];
 
 self.addEventListener('install', (event) => {

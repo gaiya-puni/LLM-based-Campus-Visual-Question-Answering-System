@@ -1,11 +1,9 @@
 <template>
   <div class="sidebar-root">
-    <div style="margin-bottom: 25px; display: flex; align-items: center; padding: 15px; background: linear-gradient(90deg, #c20a1c 0%, #a50918 100%); border-radius: 12px;">
-        <div style="width:55px;height:55px;border-radius:50%;background:white;display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;">
-            <img src="./icons/ecnu_logo.png" style="width:90%;height:90%;object-fit:contain;" />
-        </div>
-            <el-text style="font-family: 'Times New Roman', Times, serif; color: white; margin-left: 10px; font-size: 19px; font-weight: bold; line-height: 1.4;">
-                ECNU校园可视问答系统</el-text>
+    <div style="margin-bottom: 25px; display: flex; align-items: center; gap: 10px; padding: 15px; background: linear-gradient(90deg, #c20a1c 0%, #a50918 100%); border-radius: 12px;">
+        <img src="./icons/tree.png" alt="知行校园图标" style="width:48px;height:48px;object-fit:contain;flex-shrink:0;" />
+        <el-text style="font-family: 'Times New Roman', Times, serif; color: white; font-size: 19px; font-weight: bold; line-height: 1.4;">
+            知行校园 CampusMind</el-text>
     </div>
 
     <el-radio-group v-model="isCollapse" style="margin-bottom: 20px">

@@ -28,19 +28,15 @@
     <div class="chatbot-container" :class="{ 'mobile-hidden': isMobile && mobileMapView }">
       <!-- 顶部标题栏 -->
       <div class="chatbot-header">
-        <img src="@/assets/ecnu-logo.png" class="header-logo" alt="ECNU Logo" />
-        <el-text class="header-title">校园智能助手</el-text>
+        <el-text class="header-title">知行校园 CampusMind</el-text>
         <el-text class="header-subtitle">有什么可以帮您的？</el-text>
       </div>
 
       <!-- 聊天消息区域 -->
       <div class="chat-messages" ref="messagesContainer">
         <div class="message-bot">
-          <div class="avatar-bot">
-            <img src="@/assets/ecnu-logo.png" class="avatar-img" alt="ECNU" />
-          </div>
           <div class="message-content">
-            <p>您好！我是校园智能助手，很高兴为您服务！</p>
+            <p>您好！我是知行校园 CampusMind，很高兴为您服务！</p>
             <p>请问您想了解什么？比如：</p>
             <ul class="suggestions">
               <li @click="sendMessage('校园里有哪些樱花？在哪里？')">校园里有哪些樱花？在哪里？</li>
@@ -52,9 +48,8 @@
         </div>
 
         <div v-for="msg in messages" :key="msg.id" :class="['message-item', msg.type]">
-          <div :class="['avatar', msg.type === 'user' ? 'avatar-user' : 'avatar-bot']">
-            <div v-if="msg.type === 'user'" class="user-avatar-icon"><User /></div>
-            <img v-else src="@/assets/ecnu-logo.png" class="avatar-img" alt="ECNU" />
+          <div v-if="msg.type === 'user'" class="avatar avatar-user">
+            <div class="user-avatar-icon"><User /></div>
           </div>
           <div :class="['message-bubble', msg.type === 'user' ? 'user-bubble' : 'bot-bubble']">
             <div v-if="msg.type === 'user'">
@@ -91,9 +86,6 @@
         </div>
 
         <div v-if="isLoading" class="loading-message">
-          <div class="avatar-bot">
-            <img src="@/assets/ecnu-logo.png" class="avatar-img" alt="ECNU" />
-          </div>
           <div class="loading-bubble">
             <span class="loading-dot"></span>
             <span class="loading-dot"></span>
@@ -1123,14 +1115,6 @@ const scrollToBottom = () => {
   color: white;
   flex-shrink: 0;
 
-  .header-logo {
-    width: 36px;
-    height: 36px;
-    border-radius: 8px;
-    margin-right: 12px;
-    object-fit: cover;
-  }
-
   .header-title {
     font-size: 18px;
     font-weight: bold;
@@ -1156,22 +1140,6 @@ const scrollToBottom = () => {
 .message-bot {
   display: flex;
   margin-bottom: 16px;
-
-  .avatar-bot {
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    background: white;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    margin-right: 12px;
-    padding: 3px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-
-    .avatar-img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
-  }
 
   .message-content {
     background: white;
@@ -1227,9 +1195,6 @@ const scrollToBottom = () => {
     margin-right: 10px;
 
     &.avatar-user { background: linear-gradient(135deg, #64b5f6 0%, #1e88e5 100%); color: white; }
-    &.avatar-bot { background: white; box-shadow: 0 2px 8px rgba(0,0,0,0.1); padding: 3px; }
-
-    .avatar-img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
   }
 
   .message-bubble {
@@ -1317,21 +1282,6 @@ const scrollToBottom = () => {
 
 .loading-message {
   display: flex;
-
-  .avatar-bot {
-    width: 38px;
-    height: 38px;
-    border-radius: 50%;
-    background: white;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin-right: 10px;
-    padding: 3px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-
-    .avatar-img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
-  }
 
   .loading-bubble {
     background: white;
