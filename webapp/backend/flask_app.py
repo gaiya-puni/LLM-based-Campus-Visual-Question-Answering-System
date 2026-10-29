@@ -71,6 +71,10 @@ if _proxy_hops > 0:
     # x_for 取 X-Forwarded-For 中**从右往左第 N 个**，正好跳过客户端自己伪造的前缀，
     # 取到 nginx 追加的那个真实 IP；x_proto 让 request.is_secure 在 TLS 终结后仍为真。
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=_proxy_hops, x_proto=_proxy_hops, x_host=_proxy_hops)
+    # 这行诊断是给部署看的：安全配置最常见的失败形态是"改了 .env 但进程没重启"
+    # 或"改在了别的文件里"，表现为一切看起来正常、实际完全没生效。
+    # 启动日志里看不到这行 = ProxyFix 没启用，限流仍在按代理地址分桶。
+    print(f'反向代理：信任 {_proxy_hops} 层 X-Forwarded-*，客户端 IP 取自代理头')
 
 
 _rate_limit_buckets = defaultdict(deque)
