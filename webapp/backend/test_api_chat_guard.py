@@ -126,7 +126,10 @@ class ChatGuardTests(unittest.TestCase):
 
     def test_unhandled_exception_does_not_leak_internals(self):
         """兜底 handler 只回固定文案：栈与进程环境（含 API Key）绝不能进响应体。"""
-        secret = 'sk-leak-canary-should-never-appear'
+        # 刻意不用 `sk-` 前缀：scripts/check_publication.py 的 "OpenAI-style API key"
+        # 规则是 `sk-[A-Za-z0-9_-]{16,}`，写成那种形式会让本文件自己被 CI 判成密钥泄漏。
+        # 这里要验的是"异常细节不出响应体"，跟字符串长什么样无关。
+        secret = 'canary-credential-value-should-never-appear'
         with server.app.test_request_context('/api/chat', method='POST'):
             body, status = server.unexpected_error(RuntimeError(f'boom {secret}'))
 
