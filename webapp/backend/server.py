@@ -91,4 +91,22 @@ if __name__ == "__main__":
     # Flask 的 watchdog 可能把这些导入误判为源码变更并重启进程，导致
     # 正在处理的 /api/chat 请求出现 ECONNRESET，因此禁用自动重载。
     _debug_enabled = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
-    app.run(debug=_debug_enabled, use_reloader=False)
+    # 默认只绑回环地址：本机的开发/演示形态下，外部根本连不上后端。
+    # 需要让同网段设备访问时再显式设 FLASK_HOST=0.0.0.0（同时务必关掉 debug）。
+    _host = (os.getenv('FLASK_HOST') or '127.0.0.1').strip()
+
+    # 唯一能真正"交出 API Key"的路径就是这里：Werkzeug 调试器会在 /console 提供
+    # 交互式 Python 执行环境，等价于远程代码执行；拿到进程控制权后，`os.environ`
+    # 里的 DEEPSEEK_API_KEY 直接被读出。因此 debug 模式只允许绑回环地址，
+    # 对外监听时直接拒绝启动，而不是打印一句容易被忽略的警告。
+    if _debug_enabled and _host not in ('127.0.0.1', 'localhost', '::1'):
+        raise SystemExit(
+            f'拒绝启动：FLASK_DEBUG=true 且 FLASK_HOST={_host}。'
+            '调试控制台可在进程内执行任意代码并读取 .env 中的密钥；'
+            '对外监听时必须让 FLASK_DEBUG=false。'
+        )
+    if _debug_enabled:
+        print('警告：FLASK_DEBUG=true，Werkzeug 调试控制台已启用，仅限本机开发。')
+
+    app.run(debug=_debug_enabled, use_reloader=False, host=_host)
+
